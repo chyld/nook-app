@@ -1,0 +1,75 @@
+/* SPEC2 10: the layers, in order, then element defaults and the note theme. */
+@layer reset, tokens, base, components;
+
+@import "../../../../noteformat/theme/paper.css" layer(base);
+
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  ul,
+  ol,
+  figure {
+    margin: 0;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+@layer base {
+  :root {
+    --note-paper: var(--map-note-paper);
+    --note-ink: var(--map-note-ink);
+    --note-ink-soft: var(--map-note-ink-soft);
+    --note-rule: var(--map-note-rule);
+    --note-code-bg: var(--map-note-code-bg);
+    --note-quote-bar: var(--map-note-quote-bar);
+    --note-link: var(--map-note-link);
+    --note-table-stripe: var(--map-note-table-stripe);
+  }
+  /* The note theme is written for a page of its own; the app's body is not one. */
+  html {
+    background: var(--app-bg);
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
+    background: var(--app-bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--accent-strong);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}

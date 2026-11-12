@@ -1,0 +1,15 @@
+# Only the app and the note format library go into the build.
+*
+!noteformat/package.json
+!noteformat/package-lock.json
+!noteformat/src/
+!noteformat/theme/
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!tsconfig.json
+!packages/
+!scripts/
+!e2e/package.json
+**/node_modules/
+/packages/web/dist/

@@ -1,0 +1,187 @@
+/* SPEC2 10: the design tokens. This is the only file that holds a colour, a font family, a font
+   size, a space, a radius, a shadow or a z-index of the app's own screens. The look is version
+   1's "light and airy": a pale sidebar, white paper, one violet for the main actions, and bright
+   flat colours in small places. No gradients anywhere. The app follows the device. */
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* Type: Instrument Sans for controls, Bricolage Grotesque for names and titles. */
+    --font-ui: "Instrument Sans Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-display: "Bricolage Grotesque Variable", "Instrument Sans Variable", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-md: 0.9375rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.375rem;
+    --text-2xl: 1.875rem;
+    --editor-text: 15px;
+
+    --s-0: 0.125rem;
+    --s-1: 0.25rem;
+    --s-2: 0.5rem;
+    --s-3: 0.75rem;
+    --s-4: 1rem;
+    --s-5: 1.5rem;
+    --s-6: 2rem;
+    --s-7: 3rem;
+    --s-8: 4rem;
+
+    --r-sm: 6px;
+    --r-md: 9px;
+    --r-lg: 12px;
+    --r-pill: 999px;
+
+    --z-sheet: 20;
+    --z-popover: 30;
+    --z-dialog: 40;
+    --z-toast: 50;
+
+    /* Surfaces and ink. */
+    --app-bg: #f7f7f9;
+    --surface: #ffffff;
+    --surface-2: #f0f0f4;
+    --ink: #18181b;
+    --ink-soft: #6b6b76;
+    --rule: #e8e8ee;
+    --side-bg: #f7f7f9;
+    --side-hover: #ececf2;
+    --side-card: #ffffff;
+
+    /* The accent violet with its strong and soft shades. */
+    --accent: #6d3bf5;
+    --accent-strong: #5a2be0;
+    --accent-ink: #ffffff;
+    --accent-soft: #efe9ff;
+    --focus: #6d3bf5;
+    --active-line: rgb(109 59 245 / 0.035);
+    --selection: rgb(109 59 245 / 0.18);
+
+    /* Bright accents. */
+    --c-pink: #f0388f;
+    --c-orange: #ff8a1f;
+    --c-yellow: #ffcf33;
+    --c-green: #10b981;
+    --c-sky: #1c9bf0;
+
+    /* Six tag hues. */
+    --tag-0: #6d3bf5;
+    --tag-1: #e0257f;
+    --tag-2: #d97706;
+    --tag-3: #0b9e74;
+    --tag-4: #0f82e6;
+    --tag-5: #dc3b46;
+    --tag-0-soft: #efe9ff;
+    --tag-1-soft: #fde7f1;
+    --tag-2-soft: #fdf0dc;
+    --tag-3-soft: #dcf5ec;
+    --tag-4-soft: #ddeefc;
+    --tag-5-soft: #fbe3e5;
+    /* The toolbar's groups (SPEC2 9.4, change 4): one colour each, strong enough for white text on
+       it and for it as text on --surface (4.5:1), and its soft shade behind the group. */
+    --group-0: #6d3bf5;
+    --group-1: #c0186a;
+    --group-2: #b45309;
+    --group-3: #047857;
+    --group-4: #0a6bc4;
+    --group-5: #c42530;
+    --group-6: #0f766e;
+    --group-0-soft: #efe9ff;
+    --group-1-soft: #fde7f1;
+    --group-2-soft: #fdf0dc;
+    --group-3-soft: #dcf5ec;
+    --group-4-soft: #ddeefc;
+    --group-5-soft: #fbe3e5;
+    --group-6-soft: #d9f2ef;
+
+    /* Messages. */
+    --danger: #c0262d;
+    --danger-ink: #ffffff;
+    --danger-soft: #fbe3e5;
+    --warn-soft: #fff4d1;
+    --warn-ink: #6b5200;
+    --info-soft: #e8f2fd;
+    --ok: #0b9e74;
+    --overlay: rgb(24 24 27 / 0.32);
+
+    --shadow-1: 0 1px 2px rgb(24 24 27 / 0.06);
+    --shadow-2: 0 2px 6px rgb(24 24 27 / 0.06), 0 12px 32px rgb(24 24 27 / 0.12);
+
+    /* The note theme's surfaces mapped to the app's (paper.css keeps the note palette). */
+    --map-note-paper: #ffffff;
+    --map-note-ink: #18181b;
+    --map-note-ink-soft: #6b6b76;
+    --map-note-rule: #e6e6ea;
+    --map-note-code-bg: #f3f3f5;
+    --map-note-quote-bar: #d4d4da;
+    --map-note-link: #5a2be0;
+    --map-note-table-stripe: #f7f7f9;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --app-bg: #0f0f13;
+      --surface: #17171a;
+      --surface-2: #1f1f26;
+      --ink: #ececf0;
+      --ink-soft: #9a9aa6;
+      --rule: #2a2a33;
+      --side-bg: #111115;
+      --side-hover: #1e1e26;
+      --side-card: #23232d;
+      --accent: #a48bff;
+      --accent-strong: #b9a6ff;
+      --accent-ink: #120b2e;
+      --accent-soft: #2a2152;
+      --focus: #a48bff;
+      --active-line: rgb(164 139 255 / 0.06);
+      --selection: rgb(164 139 255 / 0.28);
+      --tag-0: #a48bff;
+      --tag-1: #f58bbd;
+      --tag-2: #f0b866;
+      --tag-3: #5fd3a8;
+      --tag-4: #6cc3f0;
+      --tag-5: #ff8f96;
+      --tag-0-soft: #2a2152;
+      --tag-1-soft: #3d1c2c;
+      --tag-2-soft: #3a2b14;
+      --tag-3-soft: #15362b;
+      --tag-4-soft: #162d3d;
+      --tag-5-soft: #3d1c1f;
+      --group-0: #a48bff;
+      --group-1: #f58bbd;
+      --group-2: #f0b866;
+      --group-3: #5fd3a8;
+      --group-4: #6cc3f0;
+      --group-5: #ff8f96;
+      --group-6: #5fcfc4;
+      --group-0-soft: #2a2152;
+      --group-1-soft: #3d1c2c;
+      --group-2-soft: #3a2b14;
+      --group-3-soft: #15362b;
+      --group-4-soft: #162d3d;
+      --group-5-soft: #3d1c1f;
+      --group-6-soft: #153634;
+      --danger: #ff8a80;
+      --danger-ink: #2b0b09;
+      --danger-soft: #45231f;
+      --warn-soft: #3b3217;
+      --warn-ink: #f0d58a;
+      --info-soft: #1f2a36;
+      --overlay: rgb(0 0 0 / 0.5);
+      --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+      --shadow-2: 0 2px 6px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.45);
+      --map-note-paper: #17171a;
+      --map-note-ink: #ececf0;
+      --map-note-ink-soft: #9a9aa6;
+      --map-note-rule: #2a2a31;
+      --map-note-code-bg: #1e1e23;
+      --map-note-quote-bar: #3a3a44;
+      --map-note-link: #b9a6ff;
+      --map-note-table-stripe: #1c1c21;
+    }
+  }
+}

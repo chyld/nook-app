@@ -1,0 +1,300 @@
+// The API contract (SPEC2 section 6): patterns, limits, request and answer shapes, and every
+// route, declared once with TypeBox. The server registers its routes from `routes`; the
+// browser's client is typed from the same declarations. Nothing here runs I/O.
+
+import { Type, type Static, type TSchema } from "@sinclair/typebox";
+
+// --- sizes and limits -------------------------------------------------------------------------
+
+export const KB = 1024;
+export const MB = 1024 * 1024;
+
+export const LIMITS = {
+  /** A note's bytes (SPEC2 4.4). */
+  noteBytes: 2 * MB,
+  /** JSON bodies; login and password bodies (section 6). */
+  jsonBody: 64 * KB,
+  loginBody: 1 * KB,
+  /** A photo upload (section 6; Caddy allows 27 MB). */
+  photoBytes: 25 * MB,
+  passwordMin: 12,
+  passwordMax: 256,
+  usernameMax: 64,
+  titleMax: 300,
+  tagMax: 30,
+  fonts: 40,
+  styles: 50,
+  styleName: 40,
+  history: 50,
+  /** Photos (section 6). */
+  stillSide: 2560,
+  animatedSide: 1280,
+  stillPixels: 120_000_000,
+  animatedPixels: 25_000_000,
+  /** Fonts fetched from Google (section 5). */
+  fontFetchBytes: 5 * MB,
+  fontFetchMs: 20_000,
+  /** One page of the font catalogue. */
+  cataloguePage: 30,
+  /** Size in points (7.6). */
+  sizeMin: 1,
+  sizeMax: 400,
+} as const;
+
+// --- patterns ---------------------------------------------------------------------------------
+
+/** Lower-case base-32. */
+export const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
+
+export const PATTERNS = {
+  noteId: "^[a-z2-7]{24}$",
+  userId: "^[a-z2-7]{16}$",
+  /** A history version: the save time in UTC and four random characters (4.2). */
+  version: "^\\d{4}-\\d\\d-\\d\\dT\\d\\d-\\d\\d-\\d\\d\\.\\d{3}Z-[a-z2-7]{4}$",
+  /** A font family slug (section 6). */
+  fontSlug: "^[a-z0-9-]{1,60}$",
+  /** A font file the server stores (`regular.woff2`, `bold-italic.woff2`, `latin-ext-400-normal.woff2`). */
+  fontFile: "^[a-z0-9-]{1,80}\\.woff2$",
+  /** A stored photo name (section 6): `A-Z a-z 0-9 _ -`, then the type's extension. */
+  photoFile: "^[A-Za-z0-9_-]{1,120}\\.(jpg|png|webp|gif|avif)$",
+  /** A tag the app writes (7.6). */
+  tag: "^[a-z]{1,30}$",
+  revision: "^[0-9a-f]{64}$",
+  /** A saved style's name: 1 to 40 characters, no control characters. */
+  styleName: "^[^\\u0000-\\u001f\\u007f]{1,40}$",
+} as const;
+
+export const RE = Object.fromEntries(Object.entries(PATTERNS).map(([k, v]) => [k, new RegExp(v, "u")])) as Record<keyof typeof PATTERNS, RegExp>;
+
+export const isNoteId = (s: unknown): s is string => typeof s === "string" && RE.noteId.test(s);
+export const isVersion = (s: unknown): s is string => typeof s === "string" && RE.version.test(s);
+
+/** `n` random base-32 characters (Web Crypto: Node and browsers). */
+export function randomBase32(n: number): string {
+  const bytes = new Uint8Array(n);
+  globalThis.crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += BASE32[b & 31];
+  return s;
+}
+
+export const newNoteId = (): string => randomBase32(24);
+export const newUserId = (): string => randomBase32(16);
+
+/** A history version for a save at `date`: `2026-11-10T14-02-11.512Z-k3fa`. */
+export function makeVersion(date: Date, random = randomBase32(4)): string {
+  return date.toISOString().replace(/:/g, "-") + "-" + random;
+}
+
+/** The app's own clipboard type (7.6). */
+export const CLIPBOARD_TYPE = "text/x-notes-markdown";
+
+// --- shapes -----------------------------------------------------------------------------------
+
+const NoteId = Type.String({ pattern: PATTERNS.noteId });
+const Version = Type.String({ pattern: PATTERNS.version });
+const Slug = Type.String({ pattern: PATTERNS.fontSlug });
+const FontFile = Type.String({ pattern: PATTERNS.fontFile });
+const PhotoFile = Type.String({ pattern: PATTERNS.photoFile });
+const StyleName = Type.String({ pattern: PATTERNS.styleName });
+const Revision = Type.String({ pattern: PATTERNS.revision });
+const Nullable = <T extends TSchema>(t: T) => Type.Union([t, Type.Null()]);
+
+export const ErrorBody = Type.Object({
+  error: Type.Object({ code: Type.String(), message: Type.String() }),
+});
+
+/** One note of the list (4.5). */
+export const Entry = Type.Object({
+  id: NoteId,
+  title: Type.String(),
+  tags: Type.Array(Type.String()),
+  created: Nullable(Type.String()),
+  /** Modification time, milliseconds since 1970. */
+  modified: Type.Number(),
+  size: Type.Number(),
+  /** "broken": the front matter does not parse (opens in Raw). "unreadable": not UTF-8. */
+  problem: Type.Optional(Type.Union([Type.Literal("broken"), Type.Literal("unreadable")])),
+  excerpt: Type.Optional(Type.String()),
+});
+
+export const TagCount = Type.Object({ tag: Type.String(), count: Type.Number() });
+
+export const NoteDoc = Type.Object({ text: Type.String(), revision: Revision, entry: Entry });
+
+export const ConflictBody = Type.Object({
+  error: Type.Object({ code: Type.String(), message: Type.String() }),
+  current: Type.Optional(NoteDoc),
+});
+
+export const User = Type.Object({ id: Type.String(), username: Type.String() });
+
+export const HistoryEntry = Type.Object({ version: Version, time: Type.String(), size: Type.Number() });
+
+export const TrashEntry = Type.Object({
+  id: NoteId,
+  title: Type.String(),
+  tags: Type.Array(Type.String()),
+  trashed: Nullable(Type.String()),
+  size: Type.Number(),
+});
+
+export const Style = Type.Object({
+  name: StyleName,
+  bold: Type.Boolean(),
+  italic: Type.Boolean(),
+  underline: Type.Boolean(),
+  strike: Type.Boolean(),
+  size: Nullable(Type.Number({ minimum: LIMITS.sizeMin, maximum: LIMITS.sizeMax })),
+  font: Nullable(Type.String({ maxLength: 100 })),
+  color: Nullable(Type.String({ maxLength: 40 })),
+  bg: Nullable(Type.String({ maxLength: 40 })),
+});
+
+export const Font = Type.Object({ family: Type.String(), slug: Slug });
+
+export const CatalogueFamily = Type.Object({ family: Type.String(), slug: Slug, category: Type.String() });
+
+export type Entry = Static<typeof Entry>;
+export type TagCount = Static<typeof TagCount>;
+export type NoteDoc = Static<typeof NoteDoc>;
+export type User = Static<typeof User>;
+export type HistoryEntry = Static<typeof HistoryEntry>;
+export type TrashEntry = Static<typeof TrashEntry>;
+export type Style = Static<typeof Style>;
+export type Font = Static<typeof Font>;
+export type CatalogueFamily = Static<typeof CatalogueFamily>;
+export type ErrorBody = Static<typeof ErrorBody>;
+export type ConflictBody = Static<typeof ConflictBody>;
+
+// --- routes -----------------------------------------------------------------------------------
+
+/** How a route's body is sent: JSON, raw Markdown text, a multipart upload, or none. */
+export type BodyKind = "none" | "json" | "markdown" | "multipart" | "json-or-markdown";
+/** What a route answers: JSON, or a file (bytes or CSS). */
+export type ReplyKind = "json" | "file";
+
+export interface RouteDef {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  url: string;
+  /** false: no session needed. */
+  auth: boolean;
+  body: BodyKind;
+  /** Largest body in bytes. */
+  bodyLimit?: number;
+  params?: TSchema;
+  query?: TSchema;
+  json?: TSchema;
+  headers?: TSchema;
+  reply: ReplyKind;
+  answer?: TSchema;
+}
+
+const r = <T extends RouteDef>(d: T): T => d;
+
+const Ok = Type.Object({});
+
+export const routes = {
+  login: r({
+    method: "POST", url: "/api/login", auth: false, body: "json", bodyLimit: LIMITS.loginBody, reply: "json",
+    json: Type.Object({ username: Type.String({ minLength: 1, maxLength: LIMITS.usernameMax }), password: Type.String({ minLength: 1, maxLength: LIMITS.passwordMax }) }, { additionalProperties: false }),
+    answer: Type.Object({ user: User }),
+  }),
+  logout: r({ method: "POST", url: "/api/logout", auth: true, body: "none", reply: "json", answer: Ok }),
+  me: r({
+    method: "GET", url: "/api/me", auth: true, body: "none", reply: "json",
+    answer: Type.Object({ user: User, lastBackup: Nullable(Type.String()) }),
+  }),
+  password: r({
+    method: "POST", url: "/api/password", auth: true, body: "json", bodyLimit: LIMITS.loginBody, reply: "json",
+    json: Type.Object({ current: Type.String({ minLength: 1, maxLength: LIMITS.passwordMax }), next: Type.String({ minLength: LIMITS.passwordMin, maxLength: LIMITS.passwordMax }) }, { additionalProperties: false }),
+    answer: Ok,
+  }),
+  list: r({
+    method: "GET", url: "/api/notes", auth: true, body: "none", reply: "json",
+    query: Type.Object({ tag: Type.Optional(Type.String({ maxLength: 100 })), q: Type.Optional(Type.String({ maxLength: 500 })) }, { additionalProperties: false }),
+    answer: Type.Object({ entries: Type.Array(Entry), tags: Type.Array(TagCount) }),
+  }),
+  create: r({
+    method: "POST", url: "/api/notes", auth: true, body: "json-or-markdown", bodyLimit: LIMITS.noteBytes, reply: "json",
+    query: Type.Object({ from: Type.Optional(NoteId) }, { additionalProperties: false }),
+    json: Type.Object({ title: Type.Optional(Type.String({ maxLength: 2000 })) }, { additionalProperties: false }),
+    answer: Type.Object({ id: NoteId, revision: Revision, entry: Entry, text: Type.String(), photosMissing: Type.Boolean() }),
+  }),
+  read: r({ method: "GET", url: "/api/notes/:id", auth: true, body: "none", reply: "json", params: Type.Object({ id: NoteId }), answer: NoteDoc }),
+  save: r({
+    method: "PUT", url: "/api/notes/:id", auth: true, body: "markdown", bodyLimit: LIMITS.noteBytes, reply: "json",
+    params: Type.Object({ id: NoteId }),
+    headers: Type.Object({ "if-match": Revision }),
+    answer: Type.Object({ revision: Revision, entry: Entry }),
+  }),
+  trash: r({ method: "DELETE", url: "/api/notes/:id", auth: true, body: "none", reply: "json", params: Type.Object({ id: NoteId }), answer: Ok }),
+  history: r({
+    method: "GET", url: "/api/notes/:id/history", auth: true, body: "none", reply: "json",
+    params: Type.Object({ id: NoteId }), answer: Type.Object({ versions: Type.Array(HistoryEntry) }),
+  }),
+  version: r({
+    method: "GET", url: "/api/notes/:id/history/:version", auth: true, body: "none", reply: "json",
+    params: Type.Object({ id: NoteId, version: Version }), answer: Type.Object({ text: Type.String() }),
+  }),
+  upload: r({
+    method: "POST", url: "/api/notes/:id/photos", auth: true, body: "multipart", bodyLimit: LIMITS.photoBytes + 64 * KB, reply: "json",
+    params: Type.Object({ id: NoteId }), answer: Type.Object({ file: PhotoFile }),
+  }),
+  asset: r({ method: "GET", url: "/api/notes/:id/assets/:file", auth: true, body: "none", reply: "file", params: Type.Object({ id: NoteId, file: PhotoFile }) }),
+  trashList: r({ method: "GET", url: "/api/trash", auth: true, body: "none", reply: "json", answer: Type.Object({ entries: Type.Array(TrashEntry) }) }),
+  trashRead: r({
+    method: "GET", url: "/api/trash/:id", auth: true, body: "none", reply: "json",
+    params: Type.Object({ id: NoteId }), answer: Type.Object({ text: Type.String(), entry: TrashEntry }),
+  }),
+  trashAsset: r({ method: "GET", url: "/api/trash/:id/assets/:file", auth: true, body: "none", reply: "file", params: Type.Object({ id: NoteId, file: PhotoFile }) }),
+  restore: r({ method: "POST", url: "/api/trash/:id/restore", auth: true, body: "none", reply: "json", params: Type.Object({ id: NoteId }), answer: Type.Object({ entry: Entry }) }),
+  empty: r({
+    method: "POST", url: "/api/trash/empty", auth: true, body: "json", reply: "json",
+    json: Type.Object({ ids: Type.Array(NoteId, { maxItems: 10000 }) }, { additionalProperties: false }),
+    answer: Type.Object({ removed: Type.Array(NoteId) }),
+  }),
+  styles: r({ method: "GET", url: "/api/styles", auth: true, body: "none", reply: "json", answer: Type.Object({ styles: Type.Array(Style) }) }),
+  styleSave: r({
+    method: "PUT", url: "/api/styles/:name", auth: true, body: "json", reply: "json",
+    params: Type.Object({ name: StyleName }),
+    json: Type.Object({ style: Style, renameFrom: Type.Optional(StyleName) }, { additionalProperties: false }),
+    answer: Type.Object({ styles: Type.Array(Style) }),
+  }),
+  styleDelete: r({
+    method: "DELETE", url: "/api/styles/:name", auth: true, body: "none", reply: "json",
+    params: Type.Object({ name: StyleName }), answer: Type.Object({ styles: Type.Array(Style) }),
+  }),
+  catalogue: r({
+    method: "GET", url: "/api/fonts/catalogue", auth: true, body: "none", reply: "json",
+    query: Type.Object({ q: Type.Optional(Type.String({ maxLength: 100 })), category: Type.Optional(Type.String({ maxLength: 40 })), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100000 })) }, { additionalProperties: false }),
+    answer: Type.Object({ families: Type.Array(CatalogueFamily), total: Type.Number(), categories: Type.Array(Type.String()), available: Type.Boolean() }),
+  }),
+  preview: r({ method: "GET", url: "/api/fonts/preview/:slug", auth: true, body: "none", reply: "file", params: Type.Object({ slug: Slug }) }),
+  fonts: r({ method: "GET", url: "/api/fonts", auth: true, body: "none", reply: "json", answer: Type.Object({ fonts: Type.Array(Font) }) }),
+  fontAdd: r({
+    method: "POST", url: "/api/fonts", auth: true, body: "json", reply: "json",
+    json: Type.Object({ slug: Slug }, { additionalProperties: false }), answer: Type.Object({ fonts: Type.Array(Font) }),
+  }),
+  fontRemove: r({ method: "DELETE", url: "/api/fonts/:slug", auth: true, body: "none", reply: "json", params: Type.Object({ slug: Slug }), answer: Type.Object({ fonts: Type.Array(Font) }) }),
+  fontsCss: r({ method: "GET", url: "/api/fonts.css", auth: true, body: "none", reply: "file" }),
+  fontFile: r({ method: "GET", url: "/api/fonts/:slug/:file", auth: true, body: "none", reply: "file", params: Type.Object({ slug: Slug, file: FontFile }) }),
+} as const;
+
+export type Routes = typeof routes;
+export type RouteName = keyof Routes;
+
+/** The JSON answer of a route. */
+export type Answer<N extends RouteName> = Routes[N] extends { answer: infer A extends TSchema } ? Static<A> : never;
+/** The JSON body of a route. */
+export type JsonBody<N extends RouteName> = Routes[N] extends { json: infer A extends TSchema } ? Static<A> : never;
+export type Params<N extends RouteName> = Routes[N] extends { params: infer A extends TSchema } ? Static<A> : Record<string, never>;
+export type Query<N extends RouteName> = Routes[N] extends { query: infer A extends TSchema } ? Static<A> : Record<string, never>;
+
+/** The address of a route with its parameters filled in. */
+export function urlOf(url: string, params: Record<string, string> = {}): string {
+  return url.replace(/:([a-z]+)/g, (_, k: string) => encodeURIComponent(params[k] ?? ""));
+}
+
+/** The browser's addresses (9.1): every one is answered with the HTML page. */
+export const PAGES = ["/", "/login", "/n/:id", "/n/:id/history", "/trash", "/fonts", "/styles", "/account"] as const;

@@ -1,0 +1,452 @@
+/*
+ * paper — the default note theme.
+ *
+ * Defines every --note-* variable the renderer emits (palette, highlight, generic fonts, body and
+ * heading sizes) for a light and a dark scheme, and the typography of a rendered note. The page
+ * puts the note in <article class="note">. No external requests: fonts are local font stacks.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Generic font names of SPEC 5.3: serif, sans, mono. */
+  --note-font-serif: "Iowan Old Style", "Source Serif 4", "Source Serif Pro", Charter, "Bitstream Charter",
+    "Sitka Text", Cambria, Georgia, serif;
+  --note-font-sans: Inter, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --note-font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Sizes: the body size, and heading sizes used by block attribute lines (size=large on a
+     heading is calc(var(--note-h1-size) * 1.25)). */
+  /* Normal text is 12pt; headings 1 to 6 are 24, 18, 14, 12, 11 and 10 points in a note of the
+     normal size (2, 1.5, 1.1667, 1, 0.9167 and 0.8333 times the note's size), so that the
+     editor's size box shows whole numbers (EDITOR-PLAN 4, format 1.2). */
+  --note-body-size: 12pt;
+  --note-h1-size: 2em;
+  --note-h2-size: 1.5em;
+  --note-h3-size: 1.1667em;
+  --note-h4-size: 1em;
+  --note-h5-size: 0.9167em;
+  --note-h6-size: 0.8333em;
+
+  /* Surfaces and text. */
+  --note-paper: #fbfaf7;
+  --note-ink: #2a2723;
+  --note-ink-soft: #6b655c;
+  --note-rule: #e4dfd6;
+  --note-code-bg: #f1ede6;
+  --note-quote-bar: #d8cfc0;
+  --note-link: #2f5d8a;
+  --note-table-stripe: #f5f2ec;
+
+  /* The palette of SPEC 5.3, tuned to stay readable as text and as a background on paper. */
+  --note-red: #c8322b;
+  --note-orange: #c8641a;
+  --note-yellow: #a87d00;
+  --note-green: #2f8a3e;
+  --note-mint: #b9ead7;
+  --note-teal: #12807c;
+  --note-blue: #2b62b8;
+  --note-indigo: #4b4bb0;
+  --note-purple: #8a3fb0;
+  --note-pink: #c2397a;
+  --note-brown: #8a5a36;
+  --note-gray: #6f6a63;
+  --note-black: #1d1b19;
+  --note-white: #ffffff;
+
+  /* The theme's default highlight colour (== marks and bg=highlight). */
+  --note-highlight: #fbe68a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --note-paper: #1c1b19;
+    --note-ink: #e8e3da;
+    --note-ink-soft: #a59e93;
+    --note-rule: #38352f;
+    --note-code-bg: #27251f;
+    --note-quote-bar: #4a453d;
+    --note-link: #8db8e8;
+    --note-table-stripe: #23211d;
+
+    --note-red: #ff7b6e;
+    --note-orange: #f5a25b;
+    --note-yellow: #e9c64a;
+    --note-green: #74cf84;
+    --note-mint: #1f5a47;
+    --note-teal: #5cc9c2;
+    --note-blue: #7aa9f0;
+    --note-indigo: #9b9cf2;
+    --note-purple: #c891ea;
+    --note-pink: #f08cbc;
+    --note-brown: #cf9a6e;
+    --note-gray: #a8a197;
+    --note-black: #0d0c0b;
+    --note-white: #f7f4ee;
+
+    --note-highlight: #6b5a12;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Page and body                                                                              */
+
+html {
+  background: var(--note-paper);
+}
+
+body {
+  margin: 0;
+  padding: clamp(1.5rem, 5vw, 4.5rem) 1.25rem 6rem;
+  background: var(--note-paper);
+  color: var(--note-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.note {
+  max-width: 40rem;
+  margin: 0 auto;
+  font-family: var(--note-font-serif);
+  font-size: var(--note-body-size);
+  line-height: 1.65;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+
+.note > :first-child {
+  margin-top: 0;
+}
+
+.note p,
+.note ul,
+.note ol,
+.note blockquote,
+.note pre,
+.note table {
+  margin: 0 0 1.1em;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Headings: they inherit the note's font (front matter beats the theme, SPEC 5.5).           */
+
+.note h1,
+.note h2,
+.note h3,
+.note h4,
+.note h5,
+.note h6 {
+  font-family: inherit;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 1.8em 0 0.6em;
+  text-wrap: balance;
+}
+
+.note h1 {
+  font-size: var(--note-h1-size);
+  margin-top: 0;
+  letter-spacing: -0.02em;
+}
+.note h2 {
+  font-size: var(--note-h2-size);
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid var(--note-rule);
+}
+.note h3 {
+  font-size: var(--note-h3-size);
+}
+.note h4 {
+  font-size: var(--note-h4-size);
+}
+.note h5 {
+  font-size: var(--note-h5-size);
+}
+.note h6 {
+  font-size: var(--note-h6-size);
+  color: var(--note-ink-soft);
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Inline                                                                                     */
+
+.note strong {
+  font-weight: 650;
+}
+
+/* SPEC 5.5: text is underlined only by ++, underline=yes, or a block's underline. Links are
+   therefore shown by colour, not by an underline. */
+.note a {
+  color: var(--note-link);
+  text-decoration: none;
+  border-radius: 2px;
+}
+.note a:hover,
+.note a:focus-visible {
+  background-color: color-mix(in srgb, var(--note-link) 12%, transparent);
+  outline: none;
+}
+
+/* SPEC 5.5: a colour from a block attribute line or a span is stronger than the theme's link
+   colour. `color` is always the first declaration the renderer writes. */
+.note [style^="color:"] a {
+  color: inherit;
+}
+
+.note u {
+  text-decoration: underline;
+  text-decoration-thickness: 0.07em;
+  text-underline-offset: 0.18em;
+}
+.note [style*="text-decoration: underline"] {
+  text-decoration-thickness: 0.07em;
+  text-underline-offset: 0.18em;
+}
+
+/* SPEC 5.2: the theme's default highlight colour. The mark keeps the surrounding text colour. */
+.note mark {
+  background-color: var(--note-highlight);
+  color: inherit;
+  padding: 0.05em 0.12em;
+  border-radius: 0.18em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.note [style*="background-color:"] {
+  padding: 0.05em 0.12em;
+  border-radius: 0.18em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.note p[style*="background-color:"],
+.note h1[style*="background-color:"],
+.note h2[style*="background-color:"],
+.note h3[style*="background-color:"],
+.note h4[style*="background-color:"],
+.note h5[style*="background-color:"],
+.note h6[style*="background-color:"] {
+  padding: 0.3em 0.5em;
+  border-radius: 0.3em;
+}
+
+.note code {
+  font-family: var(--note-font-mono);
+  font-size: 0.86em;
+  background: var(--note-code-bg);
+  padding: 0.12em 0.34em;
+  border-radius: 0.25em;
+}
+
+/* SPEC 5.5: a span's or block's font is stronger than the theme's code font. */
+.note span[style*="font-family:"] code,
+.note p[style*="font-family:"] code,
+.note h1[style*="font-family:"] code,
+.note h2[style*="font-family:"] code,
+.note h3[style*="font-family:"] code,
+.note h4[style*="font-family:"] code,
+.note h5[style*="font-family:"] code,
+.note h6[style*="font-family:"] code {
+  font-family: inherit;
+}
+
+.note del {
+  text-decoration-thickness: 0.08em;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Blocks                                                                                     */
+
+.note blockquote {
+  margin-left: 0;
+  padding: 0.1em 0 0.1em 1.1em;
+  border-left: 3px solid var(--note-quote-bar);
+  color: var(--note-ink-soft);
+  font-style: italic;
+}
+.note blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.note hr {
+  border: 0;
+  height: 1px;
+  margin: 2.4em auto;
+  width: 40%;
+  background: var(--note-rule);
+}
+
+.note ul,
+.note ol {
+  padding-left: 1.4em;
+}
+.note li {
+  margin: 0.2em 0;
+}
+.note li > ul,
+.note li > ol {
+  margin: 0.2em 0 0.3em;
+}
+.note li::marker {
+  color: var(--note-ink-soft);
+}
+
+/* Task list items: the checkbox replaces the bullet. */
+.note li:has(> input[type="checkbox"]:first-child),
+.note li:has(> p:first-child > input[type="checkbox"]:first-child) {
+  list-style: none;
+  margin-left: -1.3em;
+}
+.note input[type="checkbox"] {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--note-teal);
+}
+
+.note pre {
+  font-family: var(--note-font-mono);
+  font-size: 0.86em;
+  line-height: 1.55;
+  background: var(--note-code-bg);
+  padding: 0.9em 1.1em;
+  border-radius: 0.5em;
+  overflow-x: auto;
+  hyphens: none;
+}
+.note pre code {
+  font-size: inherit;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.note table {
+  border-collapse: collapse;
+  width: auto;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  font-variant-numeric: tabular-nums;
+  hyphens: none;
+}
+.note th,
+.note td {
+  padding: 0.4em 0.9em;
+  border-bottom: 1px solid var(--note-rule);
+}
+.note th {
+  font-weight: 650;
+  border-bottom: 2px solid var(--note-rule);
+  text-align: left;
+}
+.note tbody tr:nth-child(even) {
+  background: var(--note-table-stripe);
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Photos (SPEC 6)                                                                            */
+
+.note img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.4em auto;
+  border-radius: 0.4em;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 24px rgb(0 0 0 / 0.08);
+}
+
+/* An image that is missing or not loaded: its alt text and its path or URL. */
+.note .note-image-placeholder {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 12em;
+  max-width: 100%;
+  min-height: 5.5em;
+  box-sizing: border-box;
+  padding: 0.9em 1.1em;
+  border: 1px dashed var(--note-quote-bar);
+  border-radius: 0.4em;
+  background: var(--note-code-bg);
+  color: inherit;
+  font-family: var(--note-font-sans);
+  font-size: 0.9em;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.note .note-image-placeholder::before {
+  content: "Image not shown";
+  font-size: 0.75em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 0.25em;
+}
+.note .note-image-placeholder::after {
+  content: attr(data-src);
+  font-family: var(--note-font-mono);
+  font-size: 0.8em;
+  opacity: 0.7;
+  margin-top: 0.35em;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* SPEC 5.5 inside code and placeholders: a span's or block's colour, background and font are  */
+/* what the reader sees on inline code and on an image placeholder inside it. Neither sets a    */
+/* colour of its own; here they also give up their own background and font.                    */
+
+.note span[style*="background-color:"] code,
+.note p[style*="background-color:"] code,
+.note h1[style*="background-color:"] code,
+.note h2[style*="background-color:"] code,
+.note h3[style*="background-color:"] code,
+.note h4[style*="background-color:"] code,
+.note h5[style*="background-color:"] code,
+.note h6[style*="background-color:"] code,
+.note mark code,
+.note span[style*="background-color:"] .note-image-placeholder,
+.note p[style*="background-color:"] .note-image-placeholder,
+.note h1[style*="background-color:"] .note-image-placeholder,
+.note h2[style*="background-color:"] .note-image-placeholder,
+.note h3[style*="background-color:"] .note-image-placeholder,
+.note h4[style*="background-color:"] .note-image-placeholder,
+.note h5[style*="background-color:"] .note-image-placeholder,
+.note h6[style*="background-color:"] .note-image-placeholder,
+.note mark .note-image-placeholder {
+  background: transparent;
+}
+
+.note span[style*="font-family:"] .note-image-placeholder,
+.note span[style*="font-family:"] .note-image-placeholder::after,
+.note p[style*="font-family:"] .note-image-placeholder,
+.note p[style*="font-family:"] .note-image-placeholder::after,
+.note h1[style*="font-family:"] .note-image-placeholder,
+.note h1[style*="font-family:"] .note-image-placeholder::after,
+.note h2[style*="font-family:"] .note-image-placeholder,
+.note h2[style*="font-family:"] .note-image-placeholder::after,
+.note h3[style*="font-family:"] .note-image-placeholder,
+.note h3[style*="font-family:"] .note-image-placeholder::after,
+.note h4[style*="font-family:"] .note-image-placeholder,
+.note h4[style*="font-family:"] .note-image-placeholder::after,
+.note h5[style*="font-family:"] .note-image-placeholder,
+.note h5[style*="font-family:"] .note-image-placeholder::after,
+.note h6[style*="font-family:"] .note-image-placeholder,
+.note h6[style*="font-family:"] .note-image-placeholder::after {
+  font-family: inherit;
+}
+
+@media print {
+  body {
+    background: none;
+    padding: 0;
+  }
+  .note a {
+    color: inherit;
+  }
+}

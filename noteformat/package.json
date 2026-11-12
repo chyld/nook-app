@@ -1,0 +1,27 @@
+{
+  "name": "noteformat",
+  "version": "1.2.0",
+  "description": "Parser and HTML renderer for the note format of SPEC.md version 1.2",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": "./src/index.ts",
+  "bin": {
+    "noteformat": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "markdown-it": "^15.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

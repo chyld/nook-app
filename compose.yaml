@@ -1,0 +1,91 @@
+# The notes app, version 2 (SPEC2 13). The same file runs on the VPS and on a developer's
+# machine; settings come from .env (see .env.example). Run from this folder:
+#   docker compose -p notesv2 up -d --build
+name: notesv2
+
+x-logging: &logging
+  driver: ${LOG_DRIVER:-journald}
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    image: notesv2-app:latest
+    restart: unless-stopped
+    logging: *logging
+    # Section 5: unprivileged user, read-only root, no capabilities, no new privileges; the
+    # port is not published (Caddy is in front).
+    user: "10001:10001"
+    read_only: true
+    mem_limit: ${APP_MEMORY_LIMIT:-768m}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    environment:
+      NOTES_TRUSTED_PROXY: caddy
+    volumes:
+      - notes-data:/srv/notes
+      - notes-run:/run/notes
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/favicon.svg').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    logging: *logging
+    # Published to the internet: read-only root, no capabilities but binding ports 80 and 443,
+    # no new privileges. Caddy writes only to its volumes and /tmp.
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # Run nightly by a timer on the host (or by hand): docker compose -p notesv2 run --rm backup
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backup
+    image: notesv2-backup:latest
+    profiles: [backup]
+    logging: *logging
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - notes-data:/srv/notes
+      - notes-run:/run/notes
+
+volumes:
+  notes-data:
+  notes-run:
+  caddy-data:
+  caddy-config:

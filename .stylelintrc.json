@@ -1,0 +1,19 @@
+{
+  "overrides": [{ "files": ["**/*.svelte"], "customSyntax": "postcss-html" }],
+  "ignoreFiles": ["packages/web/src/styles/tokens.css", "packages/web/dist/**"],
+  "rules": {
+    "color-no-hex": true,
+    "color-named": "never",
+    "declaration-no-important": true,
+    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "linear-gradient", "radial-gradient", "conic-gradient", "repeating-linear-gradient", "repeating-radial-gradient", "repeating-conic-gradient"],
+    "declaration-property-value-allowed-list": {
+      "/^(margin|padding|gap|row-gap|column-gap)(-.*)?$/": ["/^((var\\(--[a-z0-9-]+\\)|0|auto|calc\\(.*var\\(--.*\\))\\s*)+$/", "/^-var/"],
+      "/^font-size$/": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit", "/^\\d+(\\.\\d+)?em$/"],
+      "/^font-family$/": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit"],
+      "/^border-radius$/": ["/^((var\\(--[a-z0-9-]+\\)|0|50%)\\s*)+$/"],
+      "/^box-shadow$/": ["/^var\\(--[a-z0-9-]+\\)$/", "none"],
+      "/^z-index$/": ["/^var\\(--[a-z0-9-]+\\)$/"],
+      "/^(color|background|background-color|border-color|outline-color|fill|stroke|caret-color|text-decoration-color)$/": ["/var\\(--[a-z0-9-]+\\)/", "transparent", "inherit", "currentcolor", "none"]
+    }
+  }
+}

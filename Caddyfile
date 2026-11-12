@@ -1,0 +1,20 @@
+# Caddy in front of the app (SPEC2 5, 13): HTTPS with automatic certificates (for the site
+# address `localhost`, Caddy's own local certificate), HSTS, request bodies of at most 27 MB.
+# Caddy sets X-Forwarded-For itself, discarding any the client sent, and keeps no access log.
+{
+	admin off
+	# The container's root is read-only; its own trust store is not used by anyone.
+	skip_install_trust
+}
+
+{$SITE_ADDRESS} {
+	request_body {
+		max_size 27MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	encode zstd gzip
+	reverse_proxy app:3000
+}
