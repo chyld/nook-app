@@ -1,6 +1,6 @@
 // Smoke check of the running Docker stack (brief: done means): log in as an account made with
 // notes-admin, create a note, type and style in Rich, save, reload. Usage:
-//   node e2e/docker-smoke.ts [https://localhost] [username] [password]
+//   node e2e/docker-smoke.ts [https://localhost:9988] [username] [password]
 import { chromium, type Page } from "playwright";
 
 /** Puts the caret at the end of the note and gives the editor the focus, through the test
@@ -12,7 +12,7 @@ async function clickEditor(p: Page): Promise<void> {
     n.select(n.text().length);
   });
 }
-const URL = process.argv[2] ?? "https://localhost";
+const URL = process.argv[2] ?? "https://localhost:9988";
 const USER = process.argv[3] ?? "smoke";
 const PASS = process.argv[4] ?? "docker smoke password";
 let failed = false;

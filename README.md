@@ -47,9 +47,9 @@ docker compose -p notesv2 exec app notes-admin add-user alice     # asks for the
 ```
 
 A quick check of the running stack (log in, create, type, style, save, reload):
-`node e2e/docker-smoke.ts https://localhost <username> <password>`.
+`node e2e/docker-smoke.ts https://localhost:9988 <username> <password>`.
 
-With `SITE_ADDRESS=localhost` and the ports of `.env.example`, open <https://localhost>
+With `SITE_ADDRESS=localhost` and the ports of `.env.example`, open <https://localhost:9988>
 (Caddy's own certificate: accept it once). The app's port is not published; Caddy is in front.
 
 ### notes-admin
