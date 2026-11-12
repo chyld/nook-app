@@ -1,10 +1,11 @@
 # The notes app, version 2 (SPEC2 13). The same file runs on the VPS and on a developer's
-# machine; settings come from .env (see .env.example). Run from this folder:
-#   docker compose -p notesv2 up -d --build
+# machine. It runs as it is, at https://localhost:9988; a .env file changes the settings (see
+# .env.example). Run from this folder:
+#   docker compose up -d --build
 name: notesv2
 
 x-logging: &logging
-  driver: ${LOG_DRIVER:-journald}
+  driver: ${LOG_DRIVER:-json-file}
 
 services:
   app:
@@ -53,9 +54,9 @@ services:
       app:
         condition: service_healthy
     ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-      - "${HTTPS_PORT:-443}:443/udp"
+      - "${HTTP_PORT:-9987}:80"
+      - "${HTTPS_PORT:-9988}:443"
+      - "${HTTPS_PORT:-9988}:443/udp"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
     volumes:
@@ -63,7 +64,7 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
-  # Run nightly by a timer on the host (or by hand): docker compose -p notesv2 run --rm backup
+  # Run nightly by a timer on the host (or by hand): docker compose run --rm backup
   backup:
     build:
       context: .

@@ -41,20 +41,27 @@ code review and 22 of the review of alpha's changes), all passing; typecheck and
 ## Running it with Docker
 
 ```sh
-cp .env.example .env              # then edit: SITE_ADDRESS, ports, restic
-docker compose -p notesv2 up -d --build
-docker compose -p notesv2 exec app notes-admin add-user alice     # asks for the password twice
+docker compose up -d --build
+docker compose exec app notes-admin add-user alice
+```
+
+The first command builds and starts the app. The second makes an account and asks for its
+password twice. Then open <https://localhost:9988> and log in. The certificate is Caddy's own,
+so the browser asks you to accept it once.
+
+No settings file is needed on your own machine. On a server, copy `.env.example` to `.env`
+and set the address and ports there (and the backup's repository, if you want backups):
+
+```sh
+cp .env.example .env
 ```
 
 A quick check of the running stack (log in, create, type, style, save, reload):
 `node e2e/docker-smoke.ts https://localhost:9988 <username> <password>`.
 
-With `SITE_ADDRESS=localhost` and the ports of `.env.example`, open <https://localhost:9988>
-(Caddy's own certificate: accept it once). The app's port is not published; Caddy is in front.
-
 ### notes-admin
 
-Run as `docker compose -p notesv2 exec app notes-admin <command>`. It talks to the running
+Run as `docker compose exec app notes-admin <command>`. It talks to the running
 server over `/run/notes/admin.sock`. Passwords are typed at a hidden prompt (or read from the
 first line of standard input when it is not a terminal: `exec -T app notes-admin add-user bob <
 password-file`).
@@ -106,7 +113,7 @@ The nightly backup runs in the `backup` container (restic). Put `RESTIC_REPOSITO
 host, for example a systemd timer or cron at 03:00:
 
 ```sh
-cd /path/to/this/folder && docker compose -p notesv2 run --rm backup
+cd /path/to/this/folder && docker compose run --rm backup
 ```
 
 It removes any copy left by an earlier run, pauses writes (the server takes every lock; the
@@ -119,9 +126,9 @@ records the time, which the Account screen shows (with a warning when it is over
 To restore:
 
 ```sh
-docker compose -p notesv2 stop app
-docker compose -p notesv2 run --rm backup notes-restore            # or a snapshot id
-docker compose -p notesv2 start app
+docker compose stop app
+docker compose run --rm backup notes-restore            # or a snapshot id
+docker compose start app
 ```
 
 The current `config/`, `users/` and `removed/` are moved aside into

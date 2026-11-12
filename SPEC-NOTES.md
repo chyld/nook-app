@@ -243,3 +243,10 @@ is not rewritten; where they depart from it:
   selected character already has (or, turning it off, none has) changes nothing; version 1's
   routine wrote the same look again in other markup, so the setting was not idempotent (found
   by the property test once it generated `spacing` and `lineAfterTable`).
+
+## Added after the build: running with no settings file
+
+SPEC2 13 has the settings in `.env`. `compose.yaml` now has a default for each, so the app runs
+with `docker compose up -d --build` alone: ports 9987 and 9988, the address `localhost`, logs to
+`json-file` (the spec's `journald` is one line in `.env`). The file names its own project, so
+`-p notesv2` is no longer written in any command.

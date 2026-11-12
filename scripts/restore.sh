@@ -1,7 +1,7 @@
 #!/bin/sh
-# Restores a backup (SPEC2 13). Stop the app first: `docker compose -p notesv2 stop app`. Then:
+# Restores a backup (SPEC2 13). Stop the app first: `docker compose stop app`. Then:
 #
-#   docker compose -p notesv2 run --rm backup notes-restore [snapshot-id]          # default: latest
+#   docker compose run --rm backup notes-restore [snapshot-id]          # default: latest
 #
 # The snapshot is restored into /srv/notes/restore-<time>/; the current config/, users/ and
 # removed/ are moved aside into /srv/notes/before-restore-<time>/ (nothing is deleted), and the

@@ -1,5 +1,5 @@
 #!/bin/sh
-# The nightly backup (SPEC2 13). Run as `docker compose -p notesv2 run --rm backup` by a timer
+# The nightly backup (SPEC2 13). Run as `docker compose run --rm backup` by a timer
 # on the host. Needs RESTIC_REPOSITORY and RESTIC_PASSWORD (and the repository's credentials).
 #
 #   1. remove /srv/notes/snapshot/ if an earlier run left it;
