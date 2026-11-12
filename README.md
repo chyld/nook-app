@@ -49,12 +49,18 @@ The first command builds and starts the app. The second makes an account and ask
 password twice. Then open <https://localhost:9988> and log in. The certificate is Caddy's own,
 so the browser asks you to accept it once.
 
-No settings file is needed on your own machine. On a server, copy `.env.example` to `.env`
-and set the address and ports there (and the backup's repository, if you want backups):
+No settings file is needed, on your own machine or on a server. On a server the app is at
+`https://<the server's IP address>:9988`, with the same certificate warning to accept once.
+
+For a real certificate and no warning, point a domain name at the server, then copy
+`.env.example` to `.env` and set `SITE_ADDRESS` to the name and the ports to 80 and 443 (the
+backup's repository is set there too):
 
 ```sh
 cp .env.example .env
 ```
+
+After changing `.env` or pulling a new version: `docker compose up -d --build --force-recreate`.
 
 A quick check of the running stack (log in, create, type, style, save, reload):
 `node e2e/docker-smoke.ts https://localhost:9988 <username> <password>`.

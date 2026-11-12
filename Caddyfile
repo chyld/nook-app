@@ -5,9 +5,13 @@
 	admin off
 	# The container's root is read-only; its own trust store is not used by anyone.
 	skip_install_trust
+	# A browser that asks by IP address names no site; it gets the site address's certificate.
+	default_sni {$SITE_ADDRESS}
 }
 
-{$SITE_ADDRESS} {
+# The site address, and any other name or IP address the server is reached by (so that
+# https://<the server's IP>:<port> works before a domain name is set up).
+{$SITE_ADDRESS}, https:// {
 	request_body {
 		max_size 27MB
 	}
