@@ -250,3 +250,8 @@ SPEC2 13 has the settings in `.env`. `compose.yaml` now has a default for each, 
 with `docker compose up -d --build` alone: ports 9987 and 9988, the address `localhost`, logs to
 `json-file` (the spec's `journald` is one line in `.env`). The file names its own project, so
 `-p notesv2` is no longer written in any command.
+
+## Changed after the build: a password has at least 5 characters
+
+SPEC2 5 asks for 12. The user chose 5 (2026-11-12). The limit is `LIMITS.passwordMin` in
+`contract/src/index.ts`; the login failure limits of section 5 are unchanged.

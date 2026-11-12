@@ -70,7 +70,7 @@ test("notes-admin over the socket: add, list, new-id, reset (ends sessions), rem
   assert.equal(st.mode & 0o777, 0o600);
   assert.equal((await fs.stat(path.dirname(sock))).mode & 0o777, 0o700);
   assert.equal((await admin(["add-user", "carol"], `${PASSWORD}\n`)).code, 0);
-  assert.notEqual((await admin(["add-user", "dave"], "short\n")).code, 0, "at least 12 characters");
+  assert.notEqual((await admin(["add-user", "dave"], "four\n")).code, 0, "at least 5 characters");
   assert.match((await admin(["list-users"])).out, /^carol\t[a-z2-7]{16}\t/);
   assert.match((await admin(["new-id"])).out.trim(), /^[a-z2-7]{24}$/);
   const c = new Client(s.app);

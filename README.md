@@ -68,7 +68,7 @@ password-file`).
 
 | Command | What it does |
 |---|---|
-| `add-user <name>` | Makes an account (password of 12 to 256 characters) |
+| `add-user <name>` | Makes an account (password of 5 to 256 characters) |
 | `reset-password <name>` | Sets a new password and ends that user's sessions |
 | `remove-user <name>` | Removes the account and its sessions; their folder moves to `removed/` |
 | `list-users` | Name, id and date of every account |

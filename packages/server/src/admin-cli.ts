@@ -86,7 +86,7 @@ async function main(): Promise<number> {
   const req: Record<string, unknown> = { command };
   if (username) req.username = username;
   if (command === "add-user" || command === "reset-password") {
-    const pw = await hiddenPrompt("Password (at least 12 characters): ");
+    const pw = await hiddenPrompt("Password (at least 5 characters): ");
     if (process.stdin.isTTY) {
       const again = await hiddenPrompt("Again: ");
       if (again !== pw) {

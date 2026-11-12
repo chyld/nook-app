@@ -17,8 +17,8 @@
   async function change(e: Event) {
     e.preventDefault();
     error = "";
-    if ([...next].length < 12) {
-      error = "A password has at least 12 characters.";
+    if ([...next].length < 5) {
+      error = "A password has at least 5 characters.";
       return;
     }
     try {
@@ -49,7 +49,7 @@
   <form class="card" onsubmit={change}>
     <h2>Change password</h2>
     <Field label="Current password" type="password" autocomplete="current-password" bind:value={current} data-testid="password-current" required />
-    <Field label="New password" type="password" autocomplete="new-password" hint="At least 12 characters." bind:value={next} data-testid="password-new" required />
+    <Field label="New password" type="password" autocomplete="new-password" hint="At least 5 characters." bind:value={next} data-testid="password-new" required />
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div><Button variant="primary" type="submit" data-testid="password-submit">Change password</Button></div>
   </form>

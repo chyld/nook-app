@@ -244,7 +244,7 @@ test("password change: needs the current one, counted in the login limit, ends o
   const other = new Client(s.app);
   await other.login("alice");
   assert.equal((await alice.post("/api/password", { current: "not the password", next: "a new long password" })).statusCode, 422);
-  assert.equal((await alice.post("/api/password", { current: PASSWORD, next: "short" })).statusCode, 400);
+  assert.equal((await alice.post("/api/password", { current: PASSWORD, next: "four" })).statusCode, 400, "under 5 characters");
   assert.equal((await alice.post("/api/password", { current: PASSWORD, next: "a new long password" })).statusCode, 200);
   assert.equal((await alice.get("/api/me")).statusCode, 200, "this session stays");
   assert.equal((await other.get("/api/me")).statusCode, 401, "others end");

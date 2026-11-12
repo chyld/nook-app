@@ -17,7 +17,7 @@ export const LIMITS = {
   loginBody: 1 * KB,
   /** A photo upload (section 6; Caddy allows 27 MB). */
   photoBytes: 25 * MB,
-  passwordMin: 12,
+  passwordMin: 5,
   passwordMax: 256,
   usernameMax: 64,
   titleMax: 300,
