@@ -8,6 +8,24 @@ x-logging: &logging
   driver: ${LOG_DRIVER:-json-file}
 
 services:
+  # Runs once before the app: makes ./data/notes (and the socket's folder) belong to the user
+  # the app runs as. Docker creates a missing folder as root, which the app could not write to.
+  owner:
+    image: notesv2-app:latest
+    pull_policy: never
+    restart: "no"
+    logging: *logging
+    user: "0:0"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["chown", "-R", "${PUID:-1000}:${PGID:-1000}", "/srv/notes", "/run/notes"]
+    volumes:
+      - ./data/notes:/srv/notes
+      - notes-run:/run/notes
+
   app:
     build:
       context: .
@@ -17,8 +35,12 @@ services:
     restart: unless-stopped
     logging: *logging
     # Section 5: unprivileged user, read-only root, no capabilities, no new privileges; the
-    # port is not published (Caddy is in front).
-    user: "10001:10001"
+    # port is not published (Caddy is in front). It runs as the person who owns this folder
+    # (PUID and PGID, 1000 unless .env says otherwise), so the files in ./data are theirs.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    depends_on:
+      owner:
+        condition: service_completed_successfully
     read_only: true
     mem_limit: ${APP_MEMORY_LIMIT:-768m}
     cap_drop: [ALL]
@@ -28,7 +50,7 @@ services:
     environment:
       NOTES_TRUSTED_PROXY: caddy
     volumes:
-      - notes-data:/srv/notes
+      - ./data/notes:/srv/notes
       - notes-run:/run/notes
     expose:
       - "3000"
@@ -61,8 +83,8 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
 
   # Run nightly by a timer on the host (or by hand): docker compose run --rm backup
   backup:
@@ -73,7 +95,7 @@ services:
     image: notesv2-backup:latest
     profiles: [backup]
     logging: *logging
-    user: "10001:10001"
+    user: "${PUID:-1000}:${PGID:-1000}"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs:
@@ -82,11 +104,9 @@ services:
       - path: .env
         required: false
     volumes:
-      - notes-data:/srv/notes
+      - ./data/notes:/srv/notes
       - notes-run:/run/notes
 
+# Everything that is kept is in ./data. This volume holds only the admin socket.
 volumes:
-  notes-data:
   notes-run:
-  caddy-data:
-  caddy-config:

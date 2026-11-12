@@ -83,7 +83,15 @@ password-file`).
 
 ## Where things are on disk
 
-The data volume is `/srv/notes`:
+Everything the app keeps is in the `data/` folder beside `compose.yaml`, made on the first
+start. Nothing is in a Docker volume, so copying `data/` copies the whole app's state, and
+`docker compose down` (with or without `-v`) leaves it alone.
+
+- `data/notes/`: the accounts and every note (below). The files belong to the user the app
+  runs as: user and group 1000 unless `PUID` and `PGID` in `.env` say otherwise.
+- `data/caddy/`, `data/caddy-config/`: Caddy's certificates (owned by root).
+
+`data/notes/` (which the app and the scripts see as `/srv/notes`):
 
 ```
 config/users.json, sessions/, backup.json, tmp/

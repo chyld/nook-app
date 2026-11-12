@@ -255,3 +255,13 @@ with `docker compose up -d --build` alone: ports 9987 and 9988, the address `loc
 
 SPEC2 5 asks for 12. The user chose 5 (2026-11-12). The limit is `LIMITS.passwordMin` in
 `contract/src/index.ts`; the login failure limits of section 5 are unchanged.
+
+## Changed after the build: the data is in `./data`, not in Docker volumes
+
+SPEC2 13 keeps the data in named volumes and runs the app as user 10001. The user asked for a
+plain folder (2026-11-12). `compose.yaml` now binds `./data/notes` to `/srv/notes` and
+`./data/caddy`, `./data/caddy-config` to Caddy's two folders. The app and the backup run as
+`PUID:PGID` (1000:1000 by default) so that the files belong to the person who owns the folder,
+and a one-shot service, `owner`, gives `./data/notes` and the admin socket's volume to that user
+before the app starts (Docker makes a missing folder as root). The one named volume left,
+`notes-run`, holds only the admin socket. The container hardening of section 5 is unchanged.
