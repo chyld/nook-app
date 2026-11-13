@@ -821,7 +821,7 @@ today. They are the reference for the mechanisms below.
 | `/trash` | Trashed notes: read, restore, empty one or all |
 | `/fonts` | The catalogue by name and category, with "Show more"; add and remove fonts |
 | `/styles` | Saved styles: rename, edit as text, delete |
-| `/account` | Change password, log out, the last backup time (a warning when over two days old); (SPEC-AGENTS 2.2) the person's agents: make a token, shown once, and revoke |
+| `/account` | Change password, log out, the last backup time (a warning when over two days old); (SPEC-AGENTS 2.2) the guide's address and the person's agents, each with its token: make, copy and revoke |
 
 `/` and `/n/<id>` share a layout: the sidebar on the left and the screen on the right. The other
 screens have a top bar with the same links. A router of about 60 lines over the History API maps
@@ -986,7 +986,7 @@ screen `window.__drawing = { text(), addText(text, x, y), setBackground(colour),
 addImage(file) }`.
 
 (SPEC-AGENTS 8) On the Account screen: `agents`, `agent-row` (with `data-name`), `agent-name`,
-`agent-make`, `agent-token`, `agent-guide`, `agent-copy`, `agent-close`, `agent-revoke`,
+`agent-make`, `agent-token`, `agent-no-token`, `agent-guide`, `agent-guide-copy`, `agent-copy`, `agent-revoke`,
 `agent-error`, `password-revokes`. `written-by` on the editor's and the drawing screen's
 header. `agent-mark` in a sidebar row. `note-row` and `history-row` have `data-agent` (the
 name) when an agent wrote the text.

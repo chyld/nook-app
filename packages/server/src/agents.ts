@@ -1,7 +1,8 @@
 // SPEC-AGENTS 2 and 3.3: agents' tokens and the limits on what agents write.
 //
 // agents.json is written only by this process, under the accounts lock, and kept in memory (as
-// users.json is). It holds each token's SHA-256, never the token. A token is good only while its
+// users.json is). It holds each token and its SHA-256: the owner chose to keep the token, so that the Account
+// screen can go on showing it (2026-11-13). A token is good only while its
 // user exists.
 
 import { createHash } from "node:crypto";
@@ -17,8 +18,11 @@ export interface AgentRecord {
   id: string;
   userId: string;
   name: string;
-  /** SHA-256 of the token, in hex. */
+  /** SHA-256 of the token, in hex: what a request's token is looked up by. */
   hash: string;
+  /** The token itself, kept so that the Account screen can show it again. Absent on a record
+   *  made before tokens were kept: that token still works, and cannot be shown. */
+  token?: string;
   /** ISO date-times; `used` is written at most once an hour. */
   created: string;
   used: string | null;
@@ -37,7 +41,15 @@ const isRecord = (v: unknown): v is AgentRecord => {
   return typeof r.id === "string" && typeof r.userId === "string" && typeof r.name === "string" && typeof r.hash === "string" && typeof r.created === "string" && (r.used === null || typeof r.used === "string");
 };
 
-const publicOf = (r: AgentRecord): Agent => ({ id: r.id, name: r.name, created: r.created, used: r.used });
+/** What the person who owns the agent is shown: never the hash. The token only when it is one
+ *  whose hash is the record's (a file edited by hand is not believed). */
+const publicOf = (r: AgentRecord): Agent => ({
+  id: r.id,
+  name: r.name,
+  created: r.created,
+  used: r.used,
+  token: typeof r.token === "string" && RE.agentToken.test(r.token) && sha256hex(r.token) === r.hash ? r.token : null,
+});
 
 /** The token of an `Authorization` header (`Bearer nook_…`), or null. */
 export function bearerToken(header: unknown): string | null {
@@ -106,7 +118,7 @@ export class Agents {
     return this.records.filter((r) => r.userId === userId).map(publicOf);
   }
 
-  /** 2.2: a new token for a person. The token is in the answer once and is never kept. */
+  /** 2.2: a new token for a person. It is kept, and listed with the agent from then on. */
   async make(userId: string, name: unknown): Promise<{ agent: Agent; token: string }> {
     const clean = cleanAgentName(name);
     if (clean === null) throw new HttpError(400, `An agent's name is 1 to ${LIMITS.agentName} characters, without control characters.`, {}, "bad-name");
@@ -118,7 +130,7 @@ export class Agents {
       let id = newAgentId();
       while (this.records.some((r) => r.id === id)) id = newAgentId();
       const token = newAgentToken();
-      const record: AgentRecord = { id, userId, name: clean, hash: sha256hex(token), created: new Date(this.now()).toISOString(), used: null };
+      const record: AgentRecord = { id, userId, name: clean, hash: sha256hex(token), token, created: new Date(this.now()).toISOString(), used: null };
       await this.#save([...this.records, record]);
       return { agent: publicOf(record), token };
     });

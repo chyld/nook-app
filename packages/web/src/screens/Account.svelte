@@ -15,35 +15,34 @@
     void session.check().catch(() => {});
   });
 
-  // SPEC-AGENTS 2.2: the person's agents. A token is shown once, when it is made.
+  // SPEC-AGENTS 2.2: the person's agents. Each row keeps showing its token, with the guide's
+  // address above them (the owner's choice, 2026-11-13).
   let agentName = $state("");
-  let copied = $state(false);
+  /** What was copied last: an agent's id, or "guide". */
+  let copied = $state("");
   $effect(() => {
     void agents.refresh();
-    // Leaving the screen forgets a token still shown.
-    return () => agents.close();
   });
   const guide = `${location.origin}${AGENT_BASE}`;
   const when = (t: string | null) => (t ? new Date(t).toLocaleString() : "never");
 
   async function makeAgent(e: Event) {
     e.preventDefault();
-    copied = false;
+    copied = "";
     if (await agents.make(agentName)) agentName = "";
   }
-  async function copyToken() {
-    const token = agents.made?.token;
-    if (!token) return;
+  /** Copies a text; `what` names the element that shows it, to select when the browser refuses. */
+  async function copy(text: string, what: string, el: HTMLElement | null) {
     try {
-      await navigator.clipboard.writeText(token);
-      copied = true;
+      await navigator.clipboard.writeText(text);
+      copied = what;
     } catch {
-      // The browser refused: the token is on the screen, selected, to copy by hand.
-      const el = document.querySelector<HTMLElement>('[data-testid="agent-token"]');
+      // The browser refused: the text is on the screen, selected, to copy by hand.
       if (el) getSelection()?.selectAllChildren(el);
-      toasts.push("The browser did not copy it. The token is selected: copy it by hand.", "warn");
+      toasts.push("The browser did not copy it. It is selected: copy it by hand.", "warn");
     }
   }
+  const shownIn = (e: Event, testid: string): HTMLElement | null => ((e.currentTarget as HTMLElement).closest("li, .guide")?.querySelector<HTMLElement>(`[data-testid="${testid}"]`) ?? null);
   async function revokeAgent(id: string, name: string) {
     if (!(await toasts.confirm(`Revoke “${name}”? Its token stops working at once. What it wrote stays.`, { ok: "Revoke", danger: true }))) return;
     await agents.revoke(id);
@@ -97,24 +96,30 @@
   <section class="card" data-testid="agents" aria-labelledby="agents-title">
     <h2 id="agents-title">Agents</h2>
     <p class="note">An agent is a program you give a token to. With it, the program can list, read, create and save your notes and drawings. It cannot delete anything.</p>
-    {#if agents.made}
-      <div class="made" role="status">
-        <p>Token for <strong>{agents.made.agent.name}</strong>. It will not be shown again.</p>
-        <code class="token" data-testid="agent-token">{agents.made.token}</code>
-        <p class="note">Give the agent this token and the address of its guide: <code data-testid="agent-guide">{guide}</code></p>
-        <div class="row">
-          <Button small variant="primary" data-testid="agent-copy" onclick={copyToken}>{copied ? "Copied" : "Copy token"}</Button>
-          <Button small data-testid="agent-close" onclick={() => agents.close()}>Close</Button>
-        </div>
+    <div class="guide">
+      <span class="label">The guide to give an agent, with its token</span>
+      <div class="row">
+        <code class="token" data-testid="agent-guide">{guide}</code>
+        <Button small data-testid="agent-guide-copy" onclick={(e) => copy(guide, "guide", shownIn(e, "agent-guide"))}>{copied === "guide" ? "Copied" : "Copy"}</Button>
       </div>
-    {/if}
+    </div>
     {#if agents.list.length}
       <ul class="agents">
         {#each agents.list as a (a.id)}
           <li data-testid="agent-row" data-name={a.name}>
-            <span class="name">{a.name}</span>
+            <div class="top">
+              <span class="name">{a.name}</span>
+              <Button small data-testid="agent-revoke" onclick={() => revokeAgent(a.id, a.name)}>Revoke</Button>
+            </div>
+            {#if a.token}
+              <div class="row">
+                <code class="token" data-testid="agent-token">{a.token}</code>
+                <Button small variant="primary" data-testid="agent-copy" onclick={(e) => copy(a.token ?? "", a.id, shownIn(e, "agent-token"))}>{copied === a.id ? "Copied" : "Copy"}</Button>
+              </div>
+            {:else}
+              <span class="times" data-testid="agent-no-token">This agent was made before tokens were kept, so its token cannot be shown. It still works. Revoke it and make a new one to see the token here.</span>
+            {/if}
             <span class="times">Made {when(a.created)} · last used {when(a.used)}</span>
-            <Button small data-testid="agent-revoke" onclick={() => revokeAgent(a.id, a.name)}>Revoke</Button>
           </li>
         {/each}
       </ul>
@@ -123,9 +128,8 @@
     {/if}
     <form class="row" onsubmit={makeAgent}>
       <Field label="Name of a new agent" hint="For example: Claude on the laptop." maxlength={LIMITS.agentName} bind:value={agentName} data-testid="agent-name" required />
-      <Button type="submit" data-testid="agent-make" disabled={agents.busy || agents.made !== null || agentName.trim() === ""}>Make a token</Button>
+      <Button type="submit" data-testid="agent-make" disabled={agents.busy || agentName.trim() === ""}>Make a token</Button>
     </form>
-    {#if agents.made}<p class="note">Close the token above before you make another.</p>{/if}
     {#if agents.error}<p class="error" role="alert" data-testid="agent-error">{agents.error}</p>{/if}
   </section>
   <div><Button data-testid="logout" onclick={logout}>Log out</Button></div>
@@ -177,18 +181,27 @@
     align-items: end;
     gap: var(--s-2);
   }
-  .made {
+  .guide {
     display: flex;
     flex-direction: column;
-    gap: var(--s-2);
-    padding: var(--s-3);
-    border-radius: var(--r-md);
-    background: var(--accent-soft);
+    gap: var(--s-1);
+  }
+  .guide .label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  /* A token or the guide's address with its Copy button: the text takes the room, and breaks. */
+  .guide .row,
+  .agents .row {
+    flex-wrap: nowrap;
+    align-items: center;
   }
   .token {
+    flex: 1;
+    min-width: 0;
     padding: var(--s-2);
     border-radius: var(--r-sm);
-    background: var(--surface);
+    background: var(--surface-2);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     overflow-wrap: anywhere;
@@ -197,28 +210,31 @@
   .agents {
     display: flex;
     flex-direction: column;
-    gap: var(--s-2);
+    gap: var(--s-3);
     margin: 0;
     padding: 0;
     list-style: none;
   }
   .agents li {
-    display: grid;
-    grid-template-columns: 1fr auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+    padding: var(--s-3);
+    border: 1px solid var(--rule);
+    border-radius: var(--r-md);
+  }
+  .agents .top {
+    display: flex;
     align-items: center;
-    gap: var(--s-0) var(--s-3);
+    justify-content: space-between;
+    gap: var(--s-3);
   }
   .agents .name {
     font-weight: 600;
     overflow-wrap: anywhere;
   }
   .agents .times {
-    grid-column: 1;
     color: var(--ink-soft);
     font-size: var(--text-xs);
-  }
-  .agents li :global(.btn) {
-    grid-column: 2;
-    grid-row: 1 / span 2;
   }
 </style>

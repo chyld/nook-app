@@ -96,19 +96,25 @@ async function tree(dir: string): Promise<Record<string, string>> {
 
 // --- tokens (2) ----------------------------------------------------------------------------------
 
-test("tokens: made, listed and revoked; the token is shown once and only its hash is on disk", async () => {
+test("tokens: made, listed and revoked; the token is kept and listed with its agent, and is in no log line", async () => {
   const { s, c, a, token } = await setup();
   assert.match(token, RE.agentToken);
   const list = (await c.get("/api/agents")).json().agents;
   assert.equal(list.length, 1);
-  assert.deepEqual(Object.keys(list[0]).sort(), ["created", "id", "name", "used"]);
+  assert.deepEqual(Object.keys(list[0]).sort(), ["created", "id", "name", "token", "used"], "never the hash");
   assert.equal(list[0].name, "claude");
   assert.equal(list[0].used, null);
   assert.match(list[0].id, RE.agentId);
-  const disk = await fs.readFile(path.join(s.root, "config", "agents.json"), "utf8");
-  assert.equal(disk.includes(token), false, "the token itself is never written");
-  assert.equal(disk.includes(token.slice(5)), false);
-  assert.equal(JSON.parse(disk).agents[0].hash, sha(token));
+  // The owner's choice (2026-11-13): the token is kept, so the Account screen can show it again.
+  assert.equal(list[0].token, token);
+  const disk = JSON.parse(await fs.readFile(path.join(s.root, "config", "agents.json"), "utf8")).agents[0];
+  assert.equal(disk.token, token);
+  assert.equal(disk.hash, sha(token));
+  // After a restart it is still listed.
+  const s2 = await startServer({}, s.root);
+  const c2 = new Client(s2.app);
+  await c2.login("alice");
+  assert.equal((await c2.get("/api/agents")).json().agents[0].token, token);
   assert.equal((await a.get(`${A}/items`)).statusCode, 200);
   assert.equal(typeof (await c.get("/api/agents")).json().agents[0].used, "string", "the first use is recorded");
   assert.equal(s.logs.some((l) => l.includes(token) || l.includes(token.slice(5))), false, "the token is in no log line");
@@ -116,6 +122,35 @@ test("tokens: made, listed and revoked; the token is shown once and only its has
   refused(await a.get(`${A}/items`), 401, "no-token", /Account screen/);
   assert.deepEqual((await c.get("/api/agents")).json().agents, []);
   assert.equal((await c.del(`/api/agents/${list[0].id}`)).statusCode, 404, "already gone");
+});
+
+test("tokens: one made before tokens were kept still works and is listed without a token; a token that is not the record's is not shown", async () => {
+  const { s, c, a, token } = await setup();
+  const file = path.join(s.root, "config", "agents.json");
+  const table = JSON.parse(await fs.readFile(file, "utf8"));
+  // As agents.json was written before: the hash only.
+  delete table.agents[0].token;
+  await fs.writeFile(file, JSON.stringify(table));
+  const s2 = await startServer({}, s.root);
+  const c2 = new Client(s2.app);
+  await c2.login("alice");
+  assert.equal((await c2.get("/api/agents")).json().agents[0].token, null);
+  assert.equal((await new AgentClient(s2.app, token).get(`${A}/items`)).statusCode, 200, "it still works");
+  // A file edited by hand: a token whose hash is not the record's is not handed out.
+  table.agents[0].token = "nook_" + "a".repeat(40);
+  await fs.writeFile(file, JSON.stringify(table));
+  const s3 = await startServer({}, s.root);
+  const c3 = new Client(s3.app);
+  await c3.login("alice");
+  assert.equal((await c3.get("/api/agents")).json().agents[0].token, null);
+  // One person is never listed another's token.
+  await s3.ctx.addUser("bob", PASSWORD);
+  const bob = new Client(s3.app);
+  bob.ip = "198.51.100.9";
+  await bob.login("bob");
+  assert.deepEqual((await bob.get("/api/agents")).json().agents, []);
+  void c;
+  void a;
 });
 
 test("tokens: the name is trimmed, 1 to 40 characters without control characters, and one of a kind", async () => {

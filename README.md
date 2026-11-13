@@ -96,8 +96,9 @@ your notes and drawings over HTTP. It cannot delete anything, move anything to t
 touch photos, fonts, styles or your account. `SPEC-AGENTS.md` is the specification.
 
 1. On the **Account** screen, under **Agents**, type a name for the agent ("Claude on the
-   laptop") and press **Make a token**. The token is shown once: copy it.
-2. Give the agent the token and the address of its guide, shown beside the token:
+   laptop") and press **Make a token**. The token appears on its row and stays
+   there, with a Copy button.
+2. Give the agent the token and the address of its guide, shown above the list:
    `https://<your address>/api/agent/v1`. The guide is one page, needs no token, and tells the
    agent everything: each route with a `curl` example, the limits, a complete example note and
    drawing, and every error with what to do about it.
@@ -136,7 +137,9 @@ What to know:
 - **Limits:** at most 20 agents; together they may make 60 changes a minute and send 300 MB a
   day. An agent's save that would empty a note or a drawing, or drop an image a drawing uses,
   is refused.
-- A token is a secret: whoever has it can read all your notes and write to them.
+- A token is a secret: whoever has it can read all your notes and write to them. Nook keeps
+  your tokens so that it can show them, so they are also in `data/notes/config/agents.json` and
+  in the backup.
 
 ## Where things are on disk
 

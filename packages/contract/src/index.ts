@@ -187,12 +187,14 @@ export const User = Type.Object({ id: Type.String(), username: Type.String() });
 /** `agent`: null for a person's version, the name for an agent's (SPEC-AGENTS 4.1). */
 export const HistoryEntry = Type.Object({ version: Version, time: Type.String(), size: Type.Number(), agent: Nullable(Type.String()) });
 
-/** An agent's token as the Account screen lists it (SPEC-AGENTS 2.2); never the token. */
+/** An agent as the Account screen lists it (SPEC-AGENTS 2.2), with its token, which the
+ *  screen keeps showing. `token` is null for an agent made before tokens were kept. */
 export const Agent = Type.Object({
   id: Type.String({ pattern: PATTERNS.agentId }),
   name: Type.String(),
   created: Type.String(),
   used: Nullable(Type.String()),
+  token: Nullable(Type.String({ pattern: PATTERNS.agentToken })),
 });
 
 export const TrashEntry = Type.Object({

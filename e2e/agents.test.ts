@@ -43,9 +43,10 @@ async function makeAgent(p: Page, name: string): Promise<string> {
   await p.getByTestId("agents").waitFor();
   await p.getByTestId("agent-name").fill(name);
   await p.getByTestId("agent-make").click();
-  await p.getByTestId("agent-token").waitFor();
-  const shown = (await p.getByTestId("agent-token").textContent())!.trim();
-  await p.getByTestId("agent-copy").click();
+  const row = p.locator(`[data-testid="agent-row"][data-name="${name}"]`);
+  await row.getByTestId("agent-token").waitFor();
+  const shown = (await row.getByTestId("agent-token").textContent())!.trim();
+  await row.getByTestId("agent-copy").click();
   const copied = await p.evaluate(() => navigator.clipboard.readText());
   assert.equal(copied, shown, "Copy copies the token that is shown");
   assert.match(shown, /^nook_[a-z2-7]{40}$/);
@@ -63,15 +64,15 @@ test("a token made on the Account screen; with it a note and the guide's drawing
   const f = await fresh();
   const { p } = f;
   const token = await makeAgent(p, "Claude on the laptop");
-  // The token is shown once: closed, it is not in the page; the row stays.
-  await p.getByTestId("agent-close").click();
-  assert.equal(await p.getByTestId("agent-token").count(), 0);
+  // The token stays on the page with its agent, beside the guide's address, also after a reload.
   assert.equal(await p.getByTestId("agent-row").count(), 1);
   assert.equal(await p.getByTestId("agent-row").getAttribute("data-name"), "Claude on the laptop");
-  assert.equal((await p.content()).includes(token), false);
   await p.reload();
   await p.getByTestId("agent-row").waitFor();
-  assert.equal(await p.getByTestId("agent-token").count(), 0, "not shown again");
+  assert.equal((await p.getByTestId("agent-token").textContent())!.trim(), token, "still shown after a reload");
+  assert.equal((await p.getByTestId("agent-guide").textContent())!.trim(), `${s.url}${A}`);
+  await p.getByTestId("agent-guide-copy").click();
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), `${s.url}${A}`, "the guide's address is copied too");
 
   // The agent reads the guide (no token needed) and works from it.
   const guide = await (await fetch(`${s.url}${A}`)).text();

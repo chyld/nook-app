@@ -58,11 +58,15 @@ open web app that an agent changed something (the person sees it on the next lis
 
 - A token is `nook_` followed by 40 characters of lower-case base-32 (200 random bits), made
   with the server's random source.
-- The server keeps only its SHA-256, in `config/agents.json` (`DataLayout.agentsFile`),
-  written under the accounts lock by SPEC2's rule for `users.json` and kept in memory. A
-  record is `{ id, userId, name, hash, created, used }`: `id` is 16 base-32 characters;
-  `created` is an ISO date-time; `used` is the ISO date-time of the last request or `null`,
-  written at most once an hour.
+- **The server keeps the token** and its SHA-256 in `config/agents.json`
+  (`DataLayout.agentsFile`), written under the accounts lock by SPEC2's rule for
+  `users.json` and kept in memory. (Decided by the owner on 2026-11-13, after the build: the
+  Account screen goes on showing a token, so the server must have it. Until then only the
+  hash was kept.) A record is `{ id, userId, name, hash, token, created, used }`: `id` is 16
+  base-32 characters; `created` is an ISO date-time; `used` is the ISO date-time of the last
+  request or `null`, written at most once an hour. A request's token is looked up by its
+  hash. A record written before tokens were kept has no `token`: it still works, and is
+  listed with `token: null`. A `token` whose hash is not the record's is listed as `null`.
 - **The name** is trimmed first, then must be 1 to 40 characters, none of them U+0000 to
   U+001F or U+007F to U+009F (`PATTERNS.agentName`, a pattern of its own), and unique among
   one person's tokens, compared without case.
@@ -76,7 +80,7 @@ open web app that an agent changed something (the person sees it on the next lis
   written, where the sessions are deleted. So `agents.json` is written before `users.json`,
   and a crash between the two leaves the old password without tokens, never a new password
   with old tokens. The Account screen says before a password change that it revokes them.
-- `config/` is already in the backup, so the hashes are.
+- `config/` is already in the backup, so the tokens are: a copy of the backup holds them.
 
 ### 2.2 Making and revoking, in the web app
 
@@ -84,16 +88,18 @@ Three routes for the browser, with a session and the `Origin` check as every oth
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /api/agents` | none | `{ agents: [{ id, name, created, used }] }` |
+| `GET /api/agents` | none | `{ agents: [{ id, name, created, used, token }] }` |
 | `POST /api/agents` | `{ name }` | 201 `{ agent, token }`; 409 `name-taken`; 409 `limit` at 20; 400 for a bad name |
 | `DELETE /api/agents/:id` | none | `{}`; 404 for another person's or none |
 
-The token is in the answer to `POST` once and is never shown again.
+A person's own agents are listed with their tokens, every time; never another person's, and
+never a hash.
 
-The Account screen gains a section, **Agents**: the list (name, when made, when last used),
-a field and a button to make one, and **Revoke** on each row, which asks first. After making
-one, the screen shows the token with a **Copy** button, the address of the guide (5.1) and a
-line saying it will not be shown again; it stays until the person closes it.
+The Account screen gains a section, **Agents**: the address of the guide (5.1) with a
+**Copy** button; the list, each row with the agent's name, its token with a **Copy** button,
+when it was made and last used, and **Revoke**, which asks first; and a field and a button to
+make one. A token stays on its row for as long as the agent exists. A row whose agent was
+made before tokens were kept says that its token cannot be shown.
 
 ## 3. The boundary
 

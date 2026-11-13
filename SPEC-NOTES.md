@@ -464,8 +464,12 @@ numbers are that document's. Section 6 (the short form for drawings) is not buil
 - Writing a token's last use happens inside the request that finds it stale by an hour, under
   the accounts lock. If the write fails the request goes on.
 - A token's id is 16 base-32 characters (`PATTERNS.agentId`).
-- The Account screen's test ids are those of section 8 and `agent-guide`, `agent-close`,
-  `agent-error` and `password-revokes`. Leaving the screen forgets a token still shown.
+- **Tokens are kept, and shown on the Account screen for as long as the agent exists** (the
+  owner, 2026-11-13, after the build; SPEC-AGENTS 2.1 and 2.2 are changed to say so). The
+  screen no longer has a token shown once with a Close button: each row has its token and a
+  Copy button, and the guide's address is above the list with one too.
+- The Account screen's test ids are those of section 8 and `agent-guide`, `agent-guide-copy`, `agent-no-token`,
+  `agent-error` and `password-revokes`.
 
 ## Section 3: the boundary
 
