@@ -83,7 +83,7 @@ export function intentSpecs(state: EditorState, intent: Intent, o: { sel?: Sel; 
       });
     }
   }
-  const skipped = r.skipped && r.skipped.count > 0 ? `${r.skipped.count === 1 ? "One part was" : `${r.skipped.count} parts were`} left as they were: ${r.skipped.reasons.join("; ")}.` : undefined;
+  const skipped = r.skipped && r.skipped.count > 0 ? `${r.skipped.count === 1 ? "One part was left as it was" : `${r.skipped.count} parts were left as they were`}: ${r.skipped.reasons.join("; ")}.` : undefined;
   return { ok: true, specs, ...(skipped ? { skipped } : {}) };
 }
 

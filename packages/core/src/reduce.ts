@@ -116,6 +116,9 @@ export function caretChar(m: Model, p: number) {
 export function shownSize(m: Model, p: number, typing: Typing): number {
   for (let i = typing.marks.length - 1; i >= 0; i--) {
     const c = typing.marks[i];
+    // A size that is only the block's own, with a heading waiting on an empty line: the heading's.
+    const h = c.kind === "size" && c.own ? /^h([1-6])$/.exec(typing.block ?? "") : null;
+    if (h) return Math.round(naturalSize(m, { kind: "heading", level: Number(h[1]) }) * 10) / 10;
     if (c.kind === "size") return c.pt;
   }
   const c = caretChar(m, p);
@@ -218,7 +221,15 @@ function setBlock(doc: Doc, kind: BlockTarget, mode: Mode): Step {
       return { text: out.text, sel: caret(out.cursor), typing: { marks: [], block: kind === "paragraph" ? null : kind } };
     }
   }
-  return fromRange(changeBlock(text, from, to, kind), sel.anchor > sel.head);
+  const out = fromRange(changeBlock(text, from, to, kind), sel.anchor > sel.head);
+  // A style waiting at the caret is for what is typed next, in whichever block the line now is;
+  // code takes no style, so nothing is left waiting there. A waiting size that is only the old
+  // block's own (a style that names no size) becomes the new block's.
+  if (empty && isOut(out) && doc.typing.marks.length && kind !== "code") {
+    const now = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
+    out.typing = { marks: doc.typing.marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: now, own: true } : c)), block: null };
+  }
+  return out;
 }
 
 const ITEM = /^(\s*)(- \[[ xX]\] |[-*+] |\d+[.)] )/;
@@ -315,7 +326,8 @@ function useStyle(doc: Doc, style: SavedStyle | "reset", mode: Mode, m: Model): 
   // 9.4: "Default (reset)" with a selection clears its formatting.
   if (reset && from !== to) return setMark(doc, { kind: "clear" }, mode, m);
   const s = reset ? PLAIN_STYLE : style;
-  const changes = changesOf(s, noteSizeOf(m)).map((c): Change => (reset && c.kind === "size" ? { kind: "size", pt: lineSize(m, from, to) } : c));
+  // A style that names no size, like the reset, leaves the size the block gives: a heading keeps its own.
+  const changes = changesOf(s, noteSizeOf(m)).map((c): Change => (s.size === null && c.kind === "size" ? { kind: "size", pt: lineSize(m, from, to), own: true } : c));
   if (from === to) {
     if (mode === "raw") return { reason: REFUSE_SELECT };
     return { text: doc.text, sel: doc.sel, typing: { marks: changes, block: doc.typing.block } };
@@ -348,6 +360,8 @@ function setLink(doc: Doc, href: string | null): Step {
 
 // --- typing (7.4.3, 7.4.4, 7.6) ---------------------------------------------------------------
 
+const BLOCK_NAME: Record<BlockTarget, string> = { paragraph: "Normal text", h1: "Heading 1", h2: "Heading 2", h3: "Heading 3", h4: "Heading 4", h5: "Heading 5", h6: "Heading 6", quote: "Quote", code: "Code block" };
+
 function insertText(doc: Doc, ins: string): Step {
   const from = Math.min(doc.sel.anchor, doc.sel.head);
   const to = Math.max(doc.sel.anchor, doc.sel.head);
@@ -361,14 +375,18 @@ function insertText(doc: Doc, ins: string): Step {
   }
   // A block style chosen on an empty line: the first thing typed there starts that block.
   const kind = doc.typing.block;
+  let refused = "";
   if (r.ok && kind && kind !== "paragraph" && !isBlank(ins)) {
     const b = setBlockStyle(r.text, r.cursor, r.cursor, kind);
     // In a new code block the caret belongs after the text, not on the closing fence's line.
     const onFence = b.ok && kind === "code" && b.text[b.from - 1] === "\n" && b.text[b.from] === "`";
     if (b.ok) r = { ok: true, text: b.text, cursor: onFence ? b.from - 1 : b.from };
+    // The text is typed all the same; the person is told why it is not the block they chose.
+    else refused = `${BLOCK_NAME[kind]} was not applied${waiting.length ? " with this style" : ""}: ${b.reason}`;
   }
   const step = fromEdit(r);
   if (!isOut(step)) return step;
+  if (refused) step.skipped = { count: 1, reasons: [refused] };
   // A space typed alone leaves `typing` waiting for the next letter. (A no-break space is text:
   // SPEC-NOTES, "The kept space".)
   const alone = /^[ \t]+$/.test(ins);
@@ -650,7 +668,14 @@ function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
       const from = Math.min(doc.sel.anchor, doc.sel.head);
       const to = Math.max(doc.sel.anchor, doc.sel.head);
       const s = fromEdit(enter(doc.text, from, to));
-      if (isOut(s)) s.typing = { marks: s.text !== doc.text ? carry : doc.typing.marks, block: null };
+      if (isOut(s)) {
+        // A carried size that is only the block's own (a saved style that names no size) is
+        // the size of the block the caret is now in: the note's in a new paragraph, the
+        // heading's in the second half of a heading.
+        const now = lineSize(buildModel(s.text), s.sel.head, s.sel.head);
+        const marks = (s.text !== doc.text ? carry : doc.typing.marks).map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: now, own: true } : c));
+        s.typing = { marks, block: null };
+      }
       return s;
     }
     case "lineBreak": {

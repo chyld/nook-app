@@ -13,8 +13,9 @@ export type AttrKey = "color" | "bg" | "font" | "size" | "underline";
 export type Change =
   /** Text colour, highlight or font; `null` is "None" / "Default". */
   | { kind: "color" | "bg" | "font"; value: string | null }
-  /** Size N points (EDITOR-PLAN 4). */
-  | { kind: "size"; pt: number }
+  /** Size N points (EDITOR-PLAN 4). `own` marks a size that is only the block's own (a saved
+   *  style that names none): while it waits to be typed, it follows the block (reduce.ts). */
+  | { kind: "size"; pt: number; own?: true }
   /** One point up or down from each character's own size (SPEC2 1.3). */
   | { kind: "size-step"; dir: 1 | -1 }
   | { kind: "underline"; on: boolean }

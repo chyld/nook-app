@@ -567,3 +567,36 @@ both as icon buttons with their names as labels and tooltips (`save`, `note-tras
   being saved.
 - Move to trash is no longer in Note settings; History stays there. On the drawing screen
   History is before the divider.
+
+## A saved style with a heading (2026-11-13)
+
+Found by trying the app: a saved style and a heading chosen for the same line gave a styled
+paragraph. A style on a whole paragraph is an attribute line under it (`{color=red}`), which
+is inside the paragraph's range, and a heading was refused for any paragraph of more than one
+line of source. What changed, in `core`:
+
+- **A paragraph's attribute line is not one of its lines of text.** A paragraph of one line of
+  text with an attribute line under it becomes a heading (`setBlockStyle`); the line stays
+  under the heading, as its own. So a styled heading also changes level, which goes by way of
+  a paragraph. Text of several lines is refused as before.
+- **A block chosen on an empty line that the first letter cannot start** (a quote or a code
+  block with a style that is an attribute line) is still typed as a paragraph, and the person
+  is now told why, as a skipped part (7.4 said nothing; it was dropped in silence). The
+  message for one skipped part reads "One part was left as it was".
+- **A saved style that names no size leaves the size the block gives,** as "Default (reset)"
+  does (9.4): a heading keeps its size. It set the note's size before, which shrank headings.
+  A selection over blocks of several kinds still gets the note's size.
+- **A style waiting at the caret outlives a change of block** (departs from 7.4.3, "any other
+  change to the text clears them"): with nothing selected, a saved style and then a heading
+  on a line that has text makes the line a heading and keeps the style for what is typed
+  next.
+  A waiting size that is only the block's own (a style that names no size; the size change
+  is marked `own`) becomes the new block's, and the note's size in the paragraph Enter makes
+  out of a heading (the heading's, in the second half of a heading that Enter splits). A
+  size the style names is kept as it is. With a heading waiting on an empty line, the size
+  box shows the heading's size for such a style. Nothing is
+  left waiting when the line becomes a code block.
+
+Not changed: a paragraph with an attribute line still does not become a quote or a list (the
+format has no attribute line there), and a list chosen after a style on an empty line still
+clears the waiting style.

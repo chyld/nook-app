@@ -7,7 +7,7 @@ import { blockStyleAt } from "./style/blocks.ts";
 import { cellChars } from "./style/cells.ts";
 import type { Model } from "./style/model.ts";
 import { noteSizeOf } from "./meta.ts";
-import { caretChar, listAt } from "./reduce.ts";
+import { caretChar, listAt, shownSize } from "./reduce.ts";
 import type { BlockKind, Doc, ToolbarState, Tri, Val } from "./types.ts";
 
 /** The command ids of the toolbar (9.4, section 11). */
@@ -93,7 +93,8 @@ export function describe(doc: Doc, model: Model): ToolbarState {
           st[c.kind] = { mixed: false, value: c.value };
           break;
         case "size":
-          st.size = { mixed: false, value: c.pt };
+          // The waiting size as `−` and `+` read it: a heading waiting with a style that names no size shows the heading's.
+          st.size = { mixed: false, value: shownSize(m, doc.sel.head, doc.typing) };
           break;
         case "clear":
           st.bold = st.italic = st.strike = st.underline = "off";

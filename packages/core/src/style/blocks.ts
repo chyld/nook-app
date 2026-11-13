@@ -29,6 +29,16 @@ function attrEnd(b: BlockModel): number {
   return pb && "attributes" in pb && pb.attributes ? pb.attributes.range.end : b.info.range.end;
 }
 
+/** A block's own source without its attribute line (`{color=red}` as its last line): a
+ *  paragraph's range holds that line, and it is not one of the paragraph's lines of text. */
+function bodyOf(text: string, b: BlockModel): string {
+  const r = b.info.range;
+  const pb = b.block as { attributes?: { range: { start: number; end: number } } } | null;
+  const a = pb && "attributes" in pb && pb.attributes ? pb.attributes.range : null;
+  if (!a || a.start <= r.start || a.start > r.end) return text.slice(r.start, r.end);
+  return text.slice(r.start, a.start).replace(/(\r\n|\r|\n)[ \t]*$/, "");
+}
+
 /** What the person sees of a block: its characters, breaks as line breaks. */
 function blockStyleOf(b: BlockModel): string {
   if (b.info.kind === "heading") return `h${b.info.level}`;
@@ -180,7 +190,8 @@ export function setBlockStyle(text: string, from: number, to: number, target: Bl
       const close = /[ \t]+#+[ \t]*$/.exec(src);
       if (!level && close) p.replace(r.end - close[0].length, r.end, "");
     } else {
-      if (/[\r\n]/.test(src)) return { ok: false, reason: "a heading is one line; this paragraph has several" };
+      // The paragraph's attribute line stays under the heading, as its own (the same style).
+      if (/[\r\n]/.test(bodyOf(text, b))) return { ok: false, reason: "a heading is one line; this paragraph has several" };
       if (!level) continue;
       p.insert(r.start, "#".repeat(level) + " ");
     }

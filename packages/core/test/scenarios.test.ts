@@ -205,7 +205,7 @@ test("setMark, applyStyle and setLink (7.3, 7.6, 9.4)", () => {
   assert.deepEqual(marks("one¦", { type: "setMark", change: { kind: "size-step", dir: -1 } }), [{ kind: "size", pt: 11 }], "the shown size minus 1");
   assert.deepEqual(marks("# Head¦", { type: "setMark", change: { kind: "size-step", dir: 1 } }), [{ kind: "size", pt: 25 }]);
   assert.equal(marks("one¦", { type: "applyStyle", style: STYLE }).length, 8);
-  assert.deepEqual(marks("# Head¦", { type: "applyStyle", style: "reset" }).find((c) => c.kind === "size"), { kind: "size", pt: 24 }, "reset keeps a heading's size");
+  assert.deepEqual(marks("# Head¦", { type: "applyStyle", style: "reset" }).find((c) => c.kind === "size"), { kind: "size", pt: 24, own: true }, "reset keeps a heading's size (a size that is the block's own)");
   // Value, not toggle: on twice is on.
   const once = reduce(parse("one «two»"), { type: "setMark", change: B }, "rich");
   assert.ok(once.ok);
