@@ -109,7 +109,19 @@ export function styleToCarry(m: Model, sel: Sel, typing: Typing): Change[] {
 export function caretChar(m: Model, p: number) {
   const before = m.chars.filter((c) => c.end <= p).pop();
   const after = m.chars.find((c) => c.start >= p);
-  return before && (!after || before.block === after.block || after.start > p) ? before : after;
+  const pick = before && (!after || before.block === after.block || after.start > p) ? before : after;
+  // Only a character of the block the caret is in. On an empty line there is none: the text
+  // above or below is not the caret's, and what is typed there does not take its look.
+  // (At the start of a line that begins with markup, the character after the caret is its own.)
+  // (Before a list item's or a quote's mark the caret is in no block's range: the characters of
+  // its own line of source are its own too.)
+  const mine = touchedBlocks(m, p, p);
+  const line = lineAt(m.text, p);
+  const own = (c: typeof pick) => {
+    const k = c ? m.chars.indexOf(c) : -1;
+    return k >= 0 && (mine.some((b) => k >= b.va && k < b.vb) || (c!.start >= line.from && c!.end <= line.to));
+  };
+  return own(pick) ? pick : own(after) ? after : own(before) ? before : undefined;
 }
 
 /** The size shown in the box with nothing selected: a waiting size, else the caret's. */
@@ -824,7 +836,12 @@ function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
     case "shortcut": {
       const sc = lineShortcut(doc.text, doc.sel.head);
       if (!sc) return { reason: "there is no shortcut here" };
-      return fromEdit(sc);
+      // The marks typed with a look (`> ` in a saved style) become the block; the look they had
+      // goes on waiting for the text typed in it.
+      const look = styleToCarry(m, doc.sel, NO_TYPING);
+      const made = fromEdit(sc);
+      if (isOut(made) && look.length) made.typing = { marks: look, block: null };
+      return made;
     }
     case "setBlock":
       return setBlock(doc, intent.kind, mode);

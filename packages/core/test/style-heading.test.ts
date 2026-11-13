@@ -215,3 +215,61 @@ test("an image's width line is not taken for a style: the change is refused, as 
     assert.ok("refused" in r, `${JSON.stringify(intent)}: ${"out" in r ? r.out : ""}`);
   }
 });
+
+test("on an empty line the toolbar shows no look but the one waiting there", () => {
+  const styled = "~~***hello***~~\n{font=serif size=20pt underline=yes color=purple bg=#fff176}";
+  const at = (marked: string) => {
+    const d = parse(marked);
+    return describe(d, buildModel(d.text));
+  };
+  // In the styled line: its look.
+  const inLine = at(`${styled.replace("hello", "hel¦lo")}\n\nafter`);
+  assert.equal(inLine.bold, "on");
+  assert.deepEqual(inLine.color, { mixed: false, value: "purple" });
+  assert.deepEqual(inLine.size, { mixed: false, value: 20 });
+  // At the very start of the styled line, before its markup: still its look, not the line's above.
+  assert.equal(at(`plain\n\n¦${styled}`).bold, "on");
+  assert.deepEqual(at(`plain\n\n¦${styled}`).color, { mixed: false, value: "purple" });
+  // Before a list item's or a quote's mark: the item's own look. An empty item has none.
+  assert.equal(at("- **a**\n¦- **b**").bold, "on");
+  assert.equal(at("plain\n\n¦1. **b**").bold, "on");
+  assert.equal(at("plain\n\n¦> **b**").bold, "on");
+  assert.equal(at("- **a**\n- ¦").bold, "off");
+  // On an empty line under it, straight below or further down, and above it: plain text at the note's size.
+  for (const marked of [`${styled}\n\n¦`, `${styled}\n\n\n\n\n¦`, `${styled}\n\n¦\n\nafter`, `¦\n\n${styled}`]) {
+    const st = at(marked);
+    assert.equal(st.bold, "off", marked);
+    assert.equal(st.italic, "off", marked);
+    assert.deepEqual(st.color, { mixed: false, value: null }, marked);
+    assert.deepEqual(st.bg, { mixed: false, value: null }, marked);
+    assert.deepEqual(st.size, { mixed: false, value: 12 }, marked);
+  }
+  // What is typed there is plain, as the toolbar now says; a quote chosen there is a plain quote.
+  assert.equal(one(`${styled}\n\n\n¦`, [type("x")]), `${styled}\n\n\nx¦`);
+  assert.equal(one(`${styled}\n\n\n¦`, [Q, type("x")]), `${styled}\n\n\n> x¦`);
+  // A look that waits there (a style picked on the empty line) is shown, and is what is typed.
+  const waiting = steps(`${styled}\n\n\n¦`, [{ type: "applyStyle", style: BIG }]).doc;
+  assert.equal(describe(waiting, buildModel(waiting.text)).bold, "on");
+  assert.deepEqual(describe(waiting, buildModel(waiting.text)).size, { mixed: false, value: 20 });
+});
+
+test("a block's shortcut typed in a look keeps the look for the text typed in it", () => {
+  const typed = (text: string) => [...text].map((c) => type(c));
+  const run2 = (marked: string, intents: Intent[]) => {
+    let doc = parse(marked);
+    for (const i of intents) {
+      const r = reduce(doc, i, "rich");
+      assert.ok(r.ok, JSON.stringify(i));
+      doc = r.doc;
+      if (r.then) {
+        const t = reduce(doc, r.then, "rich");
+        if (t.ok) doc = t.doc;
+      }
+    }
+    return show(doc);
+  };
+  assert.equal(run2("¦", [{ type: "applyStyle", style: RED }, ...typed("> hi")]), "> [hi¦]{color=red}");
+  assert.equal(run2("¦", [{ type: "applyStyle", style: BIG }, ...typed("> hi")]), "> [**hi¦**]{color=red size=20pt}");
+  assert.equal(run2("¦", [{ type: "applyStyle", style: RED }, ...typed("- hi")]), "- [hi¦]{color=red}");
+  assert.equal(run2("¦", typed("> hi")), "> hi¦", "with no look, as before");
+});

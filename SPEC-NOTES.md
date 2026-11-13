@@ -651,3 +651,20 @@ dropped the style.
 - On an empty line nothing changes: the block and the look both wait for the first letter.
 - A look that moving the caret with the keyboard has cleared (7.4.3) is not waiting, and the
   toolbar does not show it: a block chosen then is plain, as before.
+
+## The toolbar on an empty line (2026-11-13)
+
+Found on the server, in a real note: on an empty line the toolbar showed the font, size, Bold
+and saved style of the text above it, because the caret's look was that of the last
+character before it anywhere in the note (`caretChar`, version 1's `selectionState`). What is
+typed on an empty line does not take that look, so a quote chosen there with "the style
+selected" was plain.
+
+- **The caret shows the look of a character of its own block only** (`caretChar` in
+  `reduce.ts`; `describe` and `shownSize` use it). On an empty line there is none: the
+  toolbar shows plain text at the note's size, and the Styles button no style, unless a look
+  is waiting there (one chosen on that line, or carried by Enter).
+- **A block's shortcut typed in a look keeps the look.** `> ` typed with a saved style
+  waiting made a plain quote, the marks having taken the look with them. The look of the
+  marks goes on waiting for the text typed in the block (`shortcut` in `reduce.ts`).
+
