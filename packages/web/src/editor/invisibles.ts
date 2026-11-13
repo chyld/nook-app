@@ -9,7 +9,8 @@
 // and built again only when a line end was added or removed, or the viewport moved. The last
 // line has no line end, so it has no pilcrow.
 
-import { RangeSetBuilder, type Extension, type Text } from "@codemirror/state";
+import { RangeSetBuilder, type EditorState, type Extension, type Text } from "@codemirror/state";
+import { editorField } from "./field.ts";
 import { Decoration, MatchDecorator, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
 
 class Eol extends WidgetType {
@@ -38,14 +39,31 @@ const marks = new MatchDecorator({
   decoration: (m) => (m[0] === "\t" ? tab : m[0] === " " ? space : kept),
 });
 
-/** The pilcrows of the line ends in `ranges` (each line once, in order). */
-export function lineEnds(doc: Text, ranges: readonly { from: number; to: number }[]): DecorationSet {
+/** Whether the line end at `pos` is inside text that Rich mode hides (a paragraph's line of
+ *  attributes, `{font=… size=…}`, is hidden together with the line end before it). */
+function hiddenEnd(hidden: DecorationSet | undefined, pos: number): boolean {
+  if (!hidden) return false;
+  let inside = false;
+  hidden.between(pos, pos + 1, (from, to, value) => {
+    // Only what is replaced hides text; a mark that styles it does not.
+    if (value.point && from <= pos && to >= pos + 1) {
+      inside = true;
+      return false;
+    }
+    return undefined;
+  });
+  return inside;
+}
+
+/** The pilcrows of the line ends in `ranges` (each line once, in order). A line end that Rich
+ *  mode hides gets none: a styled paragraph is two lines of the file and one on screen. */
+export function lineEnds(doc: Text, ranges: readonly { from: number; to: number }[], hidden?: DecorationSet): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   let last = -1;
   for (const { from, to } of ranges) {
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos);
-      if (line.number < doc.lines && line.to >= from && line.to <= to && line.to > last) {
+      if (line.number < doc.lines && line.to >= from && line.to <= to && line.to > last && !hiddenEnd(hidden, line.to)) {
         b.add(line.to, line.to, eol);
         last = line.to;
       }
@@ -65,19 +83,28 @@ export class Invisibles {
   decorations: DecorationSet;
   constructor(view: ViewLike) {
     this.marks = marks.createDeco(view as EditorView);
-    this.ends = lineEnds(view.state.doc, view.visibleRanges);
+    this.ends = lineEnds(view.state.doc, view.visibleRanges, hiddenOf(view.state));
     this.decorations = this.marks.update({ add: rangesOf(this.ends) });
   }
   update(u: Pick<ViewUpdate, "docChanged" | "viewportChanged" | "viewportMoved" | "changes" | "startState" | "state"> & { view: ViewLike }): void {
-    if (!u.docChanged && !u.viewportChanged) return;
+    // What Rich hides can change with no change to the text (the Rich/Raw button).
+    const hidden = hiddenOf(u.state);
+    const hiddenChanged = hidden !== hiddenOf(u.startState);
+    if (!u.docChanged && !u.viewportChanged && !hiddenChanged) return;
     this.marks = marks.updateDeco(u as ViewUpdate, this.marks);
-    let lines = u.viewportChanged;
+    let lines = u.viewportChanged || hiddenChanged || (u.docChanged && hidden !== undefined);
     u.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
       if (inserted.lines > 1 || u.startState.doc.sliceString(fromA, toA).includes("\n")) lines = true;
     });
-    this.ends = lines ? lineEnds(u.state.doc, u.view.visibleRanges) : this.ends.map(u.changes);
+    this.ends = lines ? lineEnds(u.state.doc, u.view.visibleRanges, hidden) : this.ends.map(u.changes);
     this.decorations = this.marks.update({ add: rangesOf(this.ends) });
   }
+}
+
+/** The ranges Rich mode replaces (none in Raw, or without the editor's field). */
+function hiddenOf(state: EditorState): DecorationSet | undefined {
+  const v = state.field(editorField, false);
+  return v && v.rich ? v.decorations : undefined;
 }
 
 function rangesOf(set: DecorationSet) {

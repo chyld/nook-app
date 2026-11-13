@@ -105,7 +105,7 @@ export const theme = EditorView.theme({
   ".rich-table-raw": { fontFamily: "var(--note-font-mono)", backgroundColor: "var(--note-code-bg)" },
   // Invisible characters, when shown: a dot over a space, an arrow over a tab, a pilcrow at a line's end.
   ".inv-space, .inv-nbsp, .inv-tab": { position: "relative" },
-  ".inv-space::before, .inv-nbsp::before, .inv-tab::before": { position: "absolute", left: "50%", top: "0", transform: "translate(-50%, -0.28em)", color: "var(--accent)", opacity: "0.75", pointerEvents: "none", fontFamily: "var(--font-ui)", fontWeight: "700", fontStyle: "normal", textDecoration: "none", whiteSpace: "pre", lineHeight: "inherit" },
+  ".inv-space::before, .inv-nbsp::before, .inv-tab::before": { position: "absolute", left: "50%", top: "0", transform: "translate(-50%, -0.28em)", color: "var(--accent)", opacity: "0.75", pointerEvents: "none", fontFamily: "var(--font-ui)", fontWeight: "700", fontStyle: "normal", textDecoration: "none", whiteSpace: "pre", lineHeight: "inherit", textIndent: "0" },
   ".inv-space::before": { content: '"·"' },
   // A kept space (U+00A0) has its own mark, so it can be told from a space.
   ".inv-nbsp::before": { content: '"°"' },
