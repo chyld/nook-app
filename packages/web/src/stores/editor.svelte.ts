@@ -9,7 +9,7 @@
 // compared with the baseline (4.3). The title and tags of a drawing live here.
 
 import { MB, type Entry, type Kind, type NoteDoc } from "../../../contract/src/index.ts";
-import { drawingFacts, drawingSignature, load, sceneOf, serialize, serializeDrawing, usedFileIds, type DrawingNook, type DrawingScene, type Eol, type Mode } from "../../../core/src/index.ts";
+import { drawingFacts, drawingSignature, load, parseDrawing, sceneOf, serialize, serializeDrawing, usedFileIds, type DrawingNook, type DrawingScene, type Eol, type Mode } from "../../../core/src/index.ts";
 import { api, ApiError } from "../lib/api.ts";
 import { router } from "../lib/router.svelte.ts";
 import { drafts, type Draft } from "./drafts.svelte.ts";
@@ -33,6 +33,8 @@ export interface ViewHandle {
   scene?(): DrawingScene;
   /** A drawing's view: replaces the scene; resolves once the drawing is ready again (4.3). */
   load?(scene: DrawingScene): Promise<void>;
+  /** A drawing's view: false while it remounts (Take theirs, a draft). */
+  isReady?(): boolean;
 }
 
 /** The address of an item of a kind. */
@@ -75,6 +77,8 @@ const blank = () => ({
   baseline: "",
   /** The item turned out to be of the other kind: the store has gone to its address. */
   wrongKind: false,
+  /** Saved as a new item: this one is left, and no draft of it is stored any more. */
+  movedOn: false,
 });
 
 const s = $state(blank());
@@ -109,8 +113,18 @@ function saveText(): string {
 }
 /** Whether what is on screen differs from what was last read or saved. */
 function unsavedNow(): boolean {
-  if (drawing()) return view?.scene !== undefined && signature() !== s.baseline;
+  if (drawing()) {
+    // Before the view is ready nothing can change (the header waits for it too); while it
+    // remounts, what was known stays.
+    if (!viewReady()) return view?.scene !== undefined && s.dirty;
+    return signature() !== s.baseline;
+  }
   return differs(text());
+}
+
+/** A drawing's view is registered and ready (4.3). */
+function viewReady(): boolean {
+  return view?.scene !== undefined && (view.isReady?.() ?? true);
 }
 
 function userId(): string {
@@ -130,7 +144,7 @@ function flushView(): void {
 }
 
 function storeDraftNow(): void {
-  if (!s.id || !userId() || s.loading) return;
+  if (!s.id || !userId() || s.loading || s.movedOn) return;
   if (drawing()) {
     if (!view?.scene) return;
     if (!unsavedNow()) {
@@ -260,7 +274,12 @@ export const editor = {
   register(h: ViewHandle | null): void {
     view = h;
     // A drawing's view registers once it is ready after its file was read: the baseline (4.3).
-    if (h?.scene && drawing()) s.baseline = signature();
+    // Its title and tags are those of the file read, so a change made before is unsaved.
+    if (h?.scene && drawing()) {
+      const f = drawingFacts(s.saved);
+      const sc = h.scene();
+      s.baseline = drawingSignature(sc.elements, sc.appState, f.title, f.tags);
+    }
     editor.changed();
   },
 
@@ -344,7 +363,18 @@ export const editor = {
       toasts.push(s.conflict.kind === "changed" ? `This ${what()} was changed elsewhere: choose Keep mine or Take theirs first.` : `This ${what()} is gone: use Save as a new ${what()} to keep your ${drawing() ? "drawing" : "text"}.`, "warn");
       return;
     }
-    if (drawing()) return saveDrawing();
+    if (drawing()) {
+      // A drawing is written only from a ready view of a file that could be read (4.3, 4.6).
+      if (s.entry?.problem) {
+        toasts.push("This drawing's file cannot be read, so it is not written.", "warn");
+        return;
+      }
+      if (!viewReady()) {
+        toasts.push("The drawing is still loading; nothing was saved.", "info");
+        return;
+      }
+      return saveDrawing();
+    }
     if (s.mixed && !s.mixedWarned) {
       s.mixedWarned = true;
       toasts.push("The mixed line endings of this note become LF in this save.", "warn");
@@ -469,6 +499,10 @@ export const editor = {
     const own = textOverride === undefined;
     if (own) flushView();
     const k: Kind = own ? s.kind : (kind ?? "note");
+    if (own && k === "drawing" && !viewReady()) {
+      toasts.push("The drawing is still loading; try again in a moment.", "info");
+      return null;
+    }
     const noun = k === "drawing" ? "drawing" : "note";
     const t = textOverride ?? saveText();
     /** What a draft of the open item holds now, to compare after the request. */
@@ -488,6 +522,12 @@ export const editor = {
         const now = g === generation ? draftNow() : (d?.text ?? sent);
         if (now === sent || drafts.put(uid, r.id, drafts.newEditorId(), now, r.revision, Date.now(), k)) {
           if (d) drafts.remove(d.key);
+        }
+        // The person goes on in the new item: leaving this one stores no draft of it.
+        if (g === generation) {
+          s.movedOn = true;
+          if (draftTimer) clearTimeout(draftTimer);
+          draftTimer = null;
         }
       }
       s.photosMissing = r.photosMissing;
@@ -602,14 +642,19 @@ async function saveDrawing(): Promise<void> {
 async function takeTheirsDrawing(doc: NoteDoc, g: number): Promise<void> {
   const id = s.id!;
   const uid = userId();
-  const mine = draftText();
-  if (drafts.put(uid, id, drafts.newEditorId(), mine, s.base, Date.now(), "drawing")) {
-    const d = drafts.get(uid, id, s.editorId);
-    if (d) drafts.remove(d.key);
-    toasts.push("Your drawing was kept as a draft; it is offered the next time you open this drawing.", "info", 6000);
-  } else {
-    s.editorId = drafts.newEditorId();
+  // Theirs must be a drawing, and the person's must be kept, before anything is replaced.
+  if (!sceneOf(doc.text)) {
+    toasts.push("The newer file cannot be read as a drawing, so it was not taken. Your drawing is kept: use Keep mine.", "error", 10000);
+    return;
   }
+  const mine = draftText();
+  if (!drafts.put(uid, id, drafts.newEditorId(), mine, s.base, Date.now(), "drawing")) {
+    toasts.push("Your drawing could not be kept as a draft (this browser refuses to store it), so theirs was not taken. Use Keep mine, or save your drawing to a file from Excalidraw's menu first.", "error", 12000);
+    return;
+  }
+  const old = drafts.get(uid, id, s.editorId);
+  if (old) drafts.remove(old.key);
+  toasts.push("Your drawing was kept as a draft; it is offered the next time you open this drawing.", "info", 6000);
   adopt(doc);
   s.conflict = null;
   const sc = sceneOf(doc.text);
@@ -645,8 +690,10 @@ async function openDrawingDraft(d: Draft): Promise<void> {
     if (fromServer[f] !== undefined) files[f] = fromServer[f];
     else missing++;
   }
+  // The draft's title and tags, where it has them (a draft Nook stores always does).
+  const n = (parseDrawing(d.text).doc?.nook ?? {}) as { title?: unknown; tags?: unknown };
   const f = drawingFacts(d.text);
-  s.nook = { ...s.nook, title: f.title, tags: f.tags };
+  s.nook = { ...s.nook, ...(typeof n.title === "string" && n.title.trim() !== "" ? { title: f.title } : {}), ...(Array.isArray(n.tags) ? { tags: f.tags } : {}) };
   s.base = d.base;
   s.offered = s.offered.filter((x) => x.key !== d.key);
   const g = generation;

@@ -48,6 +48,11 @@ export const router = {
   setGuard(g: Guard | null): void {
     guard = g;
   },
+  /** Whether the current screen may be left (asks, as `go` would), for an action that must
+   *  not start otherwise (New note, New drawing). */
+  async mayLeave(): Promise<boolean> {
+    return !guard || (await guard());
+  },
   async go(path: string, opts: { replace?: boolean; force?: boolean } = {}): Promise<boolean> {
     if (path === s.path) return true;
     if (!opts.force && guard && !(await guard())) return false;

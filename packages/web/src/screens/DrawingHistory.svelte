@@ -17,10 +17,12 @@
   const scene = $derived(text === null ? null : sceneOf(text));
   let host = $state<HTMLElement | null>(null);
   let handle: DrawingHandle | null = null;
-  let mounting = false;
-  let ready = $state(false);
+  /** The version Excalidraw shows now (review, 4): Restore waits until it is the one picked. */
+  let shown = $state<string | null>(null);
+  let busy = false;
   let failed = $state(false);
   let gone = false;
+  const ready = $derived(picked !== null && shown === picked && scene !== null);
 
   onMount(() => {
     void (async () => {
@@ -44,35 +46,47 @@
     void library.pickVersion(id, v).catch((e) => toasts.push(`This version could not be read: ${e instanceof Error ? e.message : ""}`, "error"));
   }
 
-  async function show(sc: NonNullable<typeof scene>) {
-    ready = false;
-    if (handle) {
-      await handle.load(sc);
-      if (!gone) ready = true;
-      return;
-    }
-    if (mounting || !host) return;
-    mounting = true;
+  /** Shows the version picked last: one loop, so a pick made while Excalidraw is still loading
+   *  is shown once it has loaded, and never another one (review, 4). */
+  async function sync() {
+    if (busy) return;
+    busy = true;
     try {
-      (window as unknown as { EXCALIDRAW_ASSET_PATH: string }).EXCALIDRAW_ASSET_PATH = "/assets/excalidraw/";
-      const m = await import("../drawing/mount.ts");
-      if (gone || !host) return;
-      const dark = typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
-      handle = m.mountDrawing(host, { scene: sc, viewMode: true, theme: dark ? "dark" : "light", libraryKey: null, libraryReturnUrl: `${location.origin}/d/${id}` });
-      await handle.ready;
-      if (!gone) ready = true;
+      while (!gone && host && picked !== null && scene !== null && shown !== picked) {
+        const v = picked;
+        const sc = scene;
+        shown = null;
+        if (!handle) {
+          (window as unknown as { EXCALIDRAW_ASSET_PATH: string }).EXCALIDRAW_ASSET_PATH = "/assets/excalidraw/";
+          const m = await import("../drawing/mount.ts");
+          if (gone || !host) return;
+          const dark = typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
+          handle = m.mountDrawing(host, { scene: sc, viewMode: true, theme: dark ? "dark" : "light", libraryKey: null, libraryReturnUrl: `${location.origin}/d/${id}`, onFailed: () => (failed = true) });
+          await handle.ready;
+        } else await handle.load(sc);
+        if (!gone) shown = v;
+      }
     } catch {
       failed = true;
     } finally {
-      mounting = false;
+      busy = false;
     }
   }
   $effect(() => {
-    if (scene && host) void show(scene);
+    void picked;
+    void scene;
+    if (host) void sync();
   });
+  function retry() {
+    failed = false;
+    handle?.unmount();
+    handle = null;
+    shown = null;
+    void sync();
+  }
 
   async function restore() {
-    if (!picked || text === null) return;
+    if (!picked || text === null || !ready) return;
     try {
       await library.restoreVersion(id, text, "drawing");
       toasts.push("Restored. The drawing before is now in the history too.", "info");
@@ -99,16 +113,17 @@
         </button>
       {/each}
     </div>
-    {#if picked}
-      <div class="view">
+    <!-- Always in the page, so Excalidraw is never left mounted on a removed element (review, 4). -->
+    <div class="view" class:hidden={!picked}>
+      {#if picked}
         <div class="tools">
-          <Button small variant="primary" data-testid="history-restore" disabled={text === null || scene === null} onclick={restore}>Restore this version</Button>
+          <Button small variant="primary" data-testid="history-restore" disabled={!ready} onclick={restore}>Restore this version</Button>
           {#if text !== null && scene === null}<span class="warn">This version is not an Excalidraw scene and cannot be shown or restored.</span>{/if}
-          {#if failed}<span class="warn">The drawing editor could not be loaded.</span>{/if}
+          {#if failed}<span class="warn">The drawing editor could not be loaded.</span> <Button small data-testid="drawing-retry" onclick={retry}>Try again</Button>{/if}
         </div>
-        <div class="canvas excalidraw-host" data-testid="drawing" data-ready={ready ? "true" : "false"} bind:this={host}></div>
-      </div>
-    {/if}
+      {/if}
+      <div class="canvas excalidraw-host" data-testid="drawing" data-ready={ready ? "true" : "false"} data-shown={shown ?? ""} bind:this={host}></div>
+    </div>
   </div>
 </section>
 
@@ -175,6 +190,9 @@
     border: 1px solid var(--rule);
     border-radius: var(--r-md);
     overflow: hidden;
+  }
+  .hidden {
+    display: none;
   }
   .warn {
     color: var(--warn-ink);

@@ -234,3 +234,136 @@ test("a note still saves as Markdown, with no drawing type", async () => {
   assert.equal(api.asNew[0].kind, "note");
   assert.equal(api.notes.get(nid!)!.kind, undefined);
 });
+
+// --- review fixes (codereview/RESPONSE.md) ------------------------------------------------------
+
+import { toasts } from "../src/stores/toasts.svelte.ts";
+import { library } from "../src/stores/library.svelte.ts";
+import { ApiError } from "../src/lib/api.ts";
+
+test("review 1: a drawing is never saved without a ready view: not on a broken file, not while loading", async () => {
+  // A broken file: the view never registers.
+  const id = api.add("not a scene", "drawing");
+  await editor.open(id, "drawing");
+  await editor.save();
+  assert.equal(api.saves.length, 0, "a broken drawing is never written");
+  assert.equal(api.notes.get(id)!.text, "not a scene");
+  // A view that is registered but remounting (Take theirs, a draft): not ready.
+  const id2 = api.add(emptyDrawing("D", "2026-11-12"), "drawing");
+  await editor.open(id2, "drawing");
+  let ready = true;
+  screen = { elements: [], appState: {}, files: {} };
+  editor.register({ ...view, isReady: () => ready });
+  change({ elements: [rect("a")] });
+  ready = false;
+  await editor.save();
+  assert.equal(api.saves.length, 0, "no save while the view is not ready");
+  ready = true;
+  await editor.save();
+  assert.equal(api.saves.length, 1);
+});
+
+test("review 2: Take theirs keeps the person's scene and the conflict when the draft cannot be stored", async () => {
+  const id = await openDrawing(serializeDrawing({ elements: [rect("a")], appState: {}, files: {} }, nook));
+  api.notes.get(id)!.text = serializeDrawing({ elements: [rect("t", 5)], appState: {}, files: {} }, nook);
+  change({ elements: [rect("a"), rect("mine")] });
+  await editor.save();
+  assert.equal(editor.conflict?.kind, "changed");
+  storage.full = true;
+  toasts.clear();
+  await editor.takeTheirs();
+  assert.equal(loads, 0, "theirs not loaded");
+  assert.deepEqual(screen.elements.map((e) => (e as { id: string }).id), ["a", "mine"], "the person's scene is untouched");
+  assert.equal(editor.conflict?.kind, "changed", "the choice is still offered");
+  assert.ok(toasts.list.some((t) => /could not be kept/i.test(t.message)), "and the person is told");
+});
+
+test("review 3: a title or tag changed before the view is ready is unsaved, not taken into the baseline", async () => {
+  const id = api.add(serializeDrawing({ elements: [rect("a")], appState: {}, files: {} }, nook), "drawing");
+  await editor.open(id, "drawing");
+  editor.setNook({ title: "Renamed early", tags: ["art", "early"] });
+  const doc = JSON.parse(editor.loadedText);
+  screen = { elements: doc.elements, appState: doc.appState, files: doc.files };
+  editor.register(view);
+  assert.equal(editor.saveState, "dirty", "the rename counts as a change");
+  assert.equal(editor.unsaved(), true);
+});
+
+test("review 13-4: Take theirs of a newer file that is not a scene keeps the person's drawing", async () => {
+  const id = await openDrawing(serializeDrawing({ elements: [rect("a")], appState: {}, files: {} }, nook));
+  api.notes.get(id)!.text = "edited by hand into nonsense";
+  change({ elements: [rect("a", 2)] });
+  await editor.save();
+  toasts.clear();
+  await editor.takeTheirs();
+  assert.equal(loads, 0);
+  assert.equal(editor.conflict?.kind, "changed");
+  assert.deepEqual(screen.elements, [rect("a", 2)]);
+  assert.ok(toasts.list.some((t) => /cannot be read/i.test(t.message)));
+});
+
+test("review 03-3: after Save as a new drawing, leaving stores no draft of the gone drawing", async () => {
+  const id = await openDrawing(serializeDrawing({ elements: [rect("a")], appState: {}, files: {} }, nook));
+  api.notes.get(id)!.trashed = true;
+  change({ elements: [rect("a", 2)] });
+  await editor.save();
+  const nid = await editor.saveAsNew();
+  assert.ok(nid);
+  editor.close();
+  assert.deepEqual(drafts.list("uuuuuuuuuuuuuuuu").filter((d) => d.noteId === id), [], "no draft offered again for the gone drawing");
+});
+
+test("review 03-3: after Save as a new note, leaving stores no draft of the gone note", async () => {
+  const id = api.add("one\n");
+  await editor.open(id, "note");
+  let text = editor.loadedText;
+  editor.register({ getText: () => text, setText: (t) => (text = t) });
+  api.notes.get(id)!.trashed = true;
+  text = "one two\n";
+  editor.changed();
+  await editor.save();
+  assert.ok(await editor.saveAsNew());
+  editor.close();
+  assert.deepEqual(drafts.list("uuuuuuuuuuuuuuuu").filter((d) => d.noteId === id), []);
+});
+
+test("review 13-3: a draft without a title keeps the drawing's title", async () => {
+  const start = serializeDrawing({ elements: [rect("a")], appState: {}, files: {} }, nook);
+  const id = api.add(start, "drawing");
+  drafts.put("uuuuuuuuuuuuuuuu", id, "hhhhhhhhhhhhhhhh", JSON.stringify({ type: "excalidraw", elements: [rect("a", 3)], appState: {}, files: {} }), rev(start), 5, "drawing");
+  await editor.open(id, "drawing");
+  screen = { elements: [rect("a")], appState: {}, files: {} };
+  editor.register(view);
+  await editor.openDraft(editor.offered[0]);
+  assert.equal(editor.nook.title, "Sketch");
+  assert.deepEqual(editor.nook.tags, ["art"]);
+});
+
+test("review 17-4: opening a draft says how many images added after the last save are missing", async () => {
+  const start = serializeDrawing({ elements: [image("i1", "f1")], appState: {}, files: { f1: png("f1") } }, nook);
+  const id = api.add(start, "drawing");
+  const draft = serializeDrawing({ elements: [image("i1", "f1"), image("i2", "f2"), image("i3", "f3")], appState: {}, files: {} }, nook);
+  drafts.put("uuuuuuuuuuuuuuuu", id, "hhhhhhhhhhhhhhhh", draft, rev(start), 5, "drawing");
+  await editor.open(id, "drawing");
+  screen = { elements: [image("i1", "f1")], appState: {}, files: { f1: png("f1") } };
+  editor.register(view);
+  toasts.clear();
+  await editor.openDraft(editor.offered[0]);
+  assert.ok(toasts.list.some((t) => /^2 images added after the last save are not in the draft/.test(t.message)), JSON.stringify(toasts.list));
+});
+
+test("review 24-4: a failed history read does not leave another drawing's versions listed", async () => {
+  const c = api.client();
+  setClient({
+    ...c,
+    history: async (id) => {
+      if (id === "aaaaaaaaaaaaaaaaaaaaaaaa") return { versions: [{ version: "2026-11-10T14-02-11.512Z-k3fa", time: "2026-11-10T14:02:11.512Z", size: 3 }] };
+      throw new ApiError(410, "trashed", "In the trash.");
+    },
+  });
+  await library.loadHistory("aaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.equal(library.versions.length, 1);
+  await library.loadHistory("bbbbbbbbbbbbbbbbbbbbbbbb").catch(() => {});
+  assert.equal(library.versionsOf, "bbbbbbbbbbbbbbbbbbbbbbbb");
+  assert.deepEqual(library.versions, [], "the other drawing's versions are gone");
+});

@@ -4,7 +4,7 @@
 // with `import()`, after setting `window.EXCALIDRAW_ASSET_PATH` (which must be set before these
 // imports run).
 
-import { createElement, useState } from "react";
+import { Component, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, MainMenu, useHandleLibrary } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
@@ -24,6 +24,8 @@ export interface MountOptions {
   onChange?: () => void;
   /** The browser refused to keep the library. */
   onLibraryNotKept?: () => void;
+  /** Excalidraw failed while drawing the scene (an error inside it). */
+  onFailed?: () => void;
 }
 
 /** What the screen holds of the mounted component. */
@@ -64,9 +66,10 @@ function readLibrary(key: string | null): unknown[] {
 
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
-/** Waits until Excalidraw has taken in its initial scene (`isLoading` ends with it). */
-async function sceneTaken(api: Api): Promise<void> {
-  for (let i = 0; i < 600 && api.getAppState().isLoading; i++) await frame();
+/** Waits until Excalidraw has taken in its initial scene (`isLoading` ends with it), however
+ *  long that takes; the screen has its own limit (review, 08-2). */
+async function sceneTaken(api: Api, current: () => boolean): Promise<void> {
+  while (current() && api.getAppState().isLoading) await frame();
 }
 
 /** Every image of the scene decoded (Excalidraw draws them from the same data URLs). */
@@ -90,7 +93,7 @@ export function mountDrawing(el: HTMLElement, o: MountOptions): DrawingHandle {
   let resolveReady: () => void = () => {};
 
   async function becameReady(a: Api, scene: DrawingScene, g: number): Promise<void> {
-    await sceneTaken(a);
+    await sceneTaken(a, () => g === generation);
     await imagesDecoded(scene.files);
     await frame();
     await document.fonts.ready;
@@ -130,7 +133,7 @@ export function mountDrawing(el: HTMLElement, o: MountOptions): DrawingHandle {
         UIOptions: { canvasActions: { toggleTheme: null, saveToActiveFile: false } },
         onChange: () => o.onChange?.(),
         onLibraryChange: (items: unknown[]) => {
-          if (!o.libraryKey) return;
+          if (!o.libraryKey || applyingStored) return;
           try {
             globalThis.localStorage.setItem(o.libraryKey, JSON.stringify(items));
           } catch {
@@ -154,15 +157,43 @@ export function mountDrawing(el: HTMLElement, o: MountOptions): DrawingHandle {
     );
   }
 
+  /** An error inside Excalidraw is caught here and reported, rather than leaving the screen
+   *  waiting for a drawing that never comes. */
+  class Boundary extends (Component as unknown as new (props: { children: unknown }) => { props: { children: unknown }; state: { failed: boolean } }) {
+    state = { failed: false };
+    static getDerivedStateFromError() {
+      return { failed: true };
+    }
+    componentDidCatch() {
+      o.onFailed?.();
+    }
+    render() {
+      return this.state.failed ? null : this.props.children;
+    }
+  }
+
   const root = createRoot(el);
   function render(scene: DrawingScene): Promise<void> {
     const g = ++generation;
     api = null;
     current = scene;
+    // A load that a newer one replaces resolves with the newer one (review, 08-3).
+    const superseded = resolveReady;
     const ready = new Promise<void>((r) => (resolveReady = r));
-    root.render(createElement(Host, { key: `scene-${g}`, scene, g }));
+    void ready.then(superseded);
+    root.render(createElement(Boundary, null, createElement(Host, { key: `scene-${g}`, scene, g })));
     return ready;
   }
+
+  // The library kept in local storage is shared by the browser's tabs: a change made in another
+  // tab is taken in here, so this tab's next change does not write over it (review, 02-8).
+  let applyingStored = false;
+  const storageChanged = (e: StorageEvent) => {
+    if (!o.libraryKey || e.key !== o.libraryKey || !api) return;
+    applyingStored = true;
+    void Promise.resolve(api.updateLibrary({ libraryItems: readLibrary(o.libraryKey), merge: false })).finally(() => (applyingStored = false));
+  };
+  if (o.libraryKey) window.addEventListener("storage", storageChanged);
   const ready = render(o.scene);
 
   const canvas = () => el.querySelector("canvas.excalidraw__canvas.interactive") as HTMLCanvasElement | null;
@@ -192,6 +223,7 @@ export function mountDrawing(el: HTMLElement, o: MountOptions): DrawingHandle {
     },
     unmount() {
       generation++;
+      window.removeEventListener("storage", storageChanged);
       root.unmount();
     },
   };

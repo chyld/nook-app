@@ -121,3 +121,9 @@ SPEC-NOTES.md, "Notes on SPEC-DRAWINGS.md".
       SPEC2.md (marked "(SPEC-DRAWINGS)").
 - [x] Full run (2026-11-12): typecheck and lint clean; core 99/99, server 74/74, web 74/74,
       e2e 70/70. No Docker command was run: the running stack has not been rebuilt with drawings.
+- [x] Code review of drawings (2026-11-12, twelve reviews in `../codereview/`; outcomes in
+      `../codereview/RESPONSE.md`, behaviour changes in SPEC-NOTES.md). Each fix has a test
+      that failed first where one could be written: web store (9 new), server (1), e2e (8 new,
+      and "a change followed at once by leaving asks first" rewritten so that it fails without
+      `flush()`). Full run: typecheck and lint clean; core 99/99, server 75/75, web 83/83,
+      e2e 78/78.

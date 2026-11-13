@@ -411,3 +411,38 @@ Chromium through Playwright (with internet access). Found:
   image is drawn by counting red pixels in a screenshot of the drawing.
 - "No font comes from another address" counts the requests of Nook's own page (its main frame):
   an embedded web page may fetch fonts in its own frame.
+
+## After the code review of drawings (2026-11-12)
+
+Twelve reviews (`../codereview/`); each finding's outcome is in `../codereview/RESPONSE.md`.
+What changed in behaviour:
+
+- **A drawing is written only from a ready view of a file that could be read** (4.3, 4.6). The
+  store refuses a save, and Save as a new drawing, of a broken file or while the view is not
+  ready (also while it remounts for Take theirs or a draft), whatever asks for it: Ctrl+S too.
+  Ctrl+S first takes in a title or tag still being typed in the header.
+- **The title and tags can be changed only once the drawing is ready,** and the baseline takes
+  the title and tags of the file read, so no change can become the baseline.
+- **Take theirs of a drawing refuses** when the person's scene cannot be kept as a draft (the
+  browser refuses to store it), or when the newer file is not a scene; the drawing and the
+  choice stay, and a message says why.
+- **The view's `flush()` always tells the store from the live scene.** Excalidraw reports a
+  change only after React has drawn it, so a change made in the same task as Save or leaving
+  had not reached the throttle yet.
+- **The drawing history screen shows the version picked last,** also when it was picked while
+  Excalidraw was loading; Restore is enabled only once the version shown is the one picked. Its
+  canvas stays in the page (hidden when nothing is picked), and it has "Try again".
+- **The two history screens** look an item up when a list narrowed by a search or a tag does
+  not have it, to go to the right one; the versions of another item are never left listed.
+- **New note and New drawing ask first** when the screen has unsaved changes, before the item
+  is made, so cancelling leaves no empty item.
+- **After Save as a new note or drawing,** leaving the old one stores no draft of it.
+- **The shape library is shared by the browser's tabs:** a change written by another tab
+  (the `storage` event) is taken into this tab's library, so its next change does not write
+  over it.
+- **A failure inside Excalidraw** (an error while drawing, or not ready within 60 seconds) shows
+  "could not be loaded" with Try again, rather than "Loading" for ever; a load replaced by a
+  newer one resolves with it. Ready no longer stops waiting for Excalidraw's scene after 600
+  frames.
+- **A note saved as new from a drawing's id** takes no photos from it, so its photos are
+  reported missing.

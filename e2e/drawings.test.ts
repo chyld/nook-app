@@ -121,13 +121,22 @@ test("a change followed at once by leaving asks first", async () => {
   const f = await fresh();
   const { p } = f;
   const id = await newDrawing(p);
-  await addText(p, "not yet told");
-  // At once: within the 200 ms in which the store may not have been told.
-  await p.locator(".brand").click();
-  await p.getByTestId("confirm").waitFor();
+  await addText(p, "saved first");
+  await save(p);
+  await p.waitForTimeout(400);
+  // In one task: a change that leaves the signature alone (the same background again), which
+  // the throttle passes on at once and which opens its 200 ms window; then a real change inside
+  // that window, which only the view's flush() can pass on; then leaving at once.
+  await p.evaluate(() => {
+    const d = (window as unknown as { __drawing: { setBackground(c: string): void; addText(t: string, x: number, y: number): void; text(): string } }).__drawing;
+    d.setBackground(JSON.parse(d.text()).appState.viewBackgroundColor);
+    d.addText("not yet told", 100, 300);
+    (document.querySelector(".brand") as HTMLElement).click();
+  });
+  await p.getByTestId("confirm").waitFor({ timeout: 3000 });
   await p.getByTestId("cancel").click();
   assert.match(p.url(), new RegExp(`/d/${id}$`));
-  assert.deepEqual(await texts(p), ["not yet told"]);
+  assert.deepEqual((await texts(p)).sort(), ["not yet told", "saved first"]);
   await f.close();
 });
 
@@ -433,4 +442,179 @@ test("opening a note requests no Excalidraw file; opening a drawing asks no font
   assert.ok(asked.some((u) => /\/assets\/mount-[^/]+\.css$/.test(u)), "Excalidraw's CSS is its own file, loaded now");
   assert.deepEqual(policyErrors(errors), []);
   await ctx.close();
+});
+
+// --- review fixes (codereview/RESPONSE.md) ------------------------------------------------------
+
+/** Puts a file in the person's folder by hand, as README says: made elsewhere, then moved in. */
+async function placeByHand(id: string, text: string): Promise<string> {
+  const uid = await userId("dana");
+  const elsewhere = path.join(s.data, "srv", "users", uid, "tmp-by-hand", id);
+  await fs.mkdir(elsewhere, { recursive: true });
+  await fs.writeFile(path.join(elsewhere, "drawing.excalidraw"), text);
+  const dest = path.join(s.data, "srv", "users", uid, "notes", id);
+  await fs.rename(elsewhere, dest);
+  return path.join(dest, "drawing.excalidraw");
+}
+
+test("review 1: Ctrl+S on a drawing that cannot be read writes nothing", async () => {
+  const file = await placeByHand("bcdefghijklmnopqrstuvwxy", '{"type":"excalidraw","elements":"not a list"}');
+  const before = await fs.readFile(file, "utf8");
+  const f = await fresh();
+  const { p } = f;
+  await p.goto(`${s.url}/d/bcdefghijklmnopqrstuvwxy`);
+  await p.getByTestId("drawing-broken").waitFor();
+  await p.keyboard.press("Control+s");
+  await p.locator("body").press("Control+s");
+  await p.waitForTimeout(800);
+  assert.equal(await fs.readFile(file, "utf8"), before, "never written");
+  await f.close();
+});
+
+test("review 4: on the history screen the version shown is the version picked, even while Excalidraw loads", async () => {
+  const f = await fresh();
+  const { p } = f;
+  const id = await newDrawing(p);
+  await addText(p, "one");
+  await save(p);
+  await addText(p, "two", 100, 200);
+  await save(p);
+  await addText(p, "three", 100, 300);
+  await save(p);
+  // A new page, whose first load of Excalidraw's script is slow.
+  const ctx = p.context();
+  const { page: q, errors } = await page(ctx);
+  await q.route(/\/assets\/mount-[^/]+\.js$/, async (r) => {
+    await new Promise((res) => setTimeout(res, 2500));
+    await r.continue();
+  });
+  await q.goto(`${s.url}/d/${id}/history`);
+  await q.getByTestId("history-row").nth(1).waitFor();
+  const rows = q.getByTestId("history-row");
+  const second = await rows.nth(1).getAttribute("data-version");
+  await rows.nth(0).click();
+  await q.waitForTimeout(300);
+  await rows.nth(1).click();
+  await q.locator(`[data-testid="drawing"][data-ready="true"][data-shown="${second}"]`).waitFor({ timeout: 30000 });
+  await q.waitForTimeout(500);
+  assert.equal(await q.getByTestId("drawing").getAttribute("data-shown"), second, "still the one picked last");
+  assert.equal(await q.getByTestId("history-restore").isEnabled(), true);
+  await q.getByTestId("history-restore").click();
+  await q.waitForURL(new RegExp(`/d/${id}$`));
+  await ready(q);
+  assert.deepEqual(await texts(q), ["one"], "the version restored is the one shown");
+  assert.deepEqual(policyErrors(errors), []);
+  await f.close();
+});
+
+test("review 5: a drawing's id under /n/…/history goes to its own history while the list is filtered", async () => {
+  const f = await fresh();
+  const { p } = f;
+  const id = await newDrawing(p);
+  await addText(p, "x");
+  await save(p);
+  await p.getByTestId("search").fill("nothing matches this");
+  await p.locator(`[data-testid="note-row"][data-id="${id}"]`).waitFor({ state: "detached" });
+  await p.evaluate((u) => {
+    history.pushState(null, "", u);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, `/n/${id}/history`);
+  await p.waitForURL(new RegExp(`/d/${id}/history$`), { timeout: 5000 });
+  await f.close();
+});
+
+test("review 24-2: Ctrl+S with a tag typed in the box saves the tag", async () => {
+  const f = await fresh();
+  const { p } = f;
+  await newDrawing(p);
+  await p.getByTestId("tag-input").fill("quick");
+  await p.getByTestId("tag-input").press("Control+s");
+  await waitState(p, "saved");
+  assert.deepEqual((await doc(p)).nook.tags, ["quick"]);
+  await p.reload();
+  await ready(p);
+  assert.equal(await p.locator('[data-testid="tag"][data-tag="quick"]').count(), 1);
+  await f.close();
+});
+
+test("review 02-8: two tabs each add a library item; both are kept", async () => {
+  const f = await fresh();
+  const a = f.p;
+  await newDrawing(a);
+  const id = /\/d\/([a-z2-7]{24})/.exec(a.url())![1];
+  const { page: bTab } = await page(a.context());
+  await bTab.goto(`${s.url}/d/${id}`);
+  await ready(bTab);
+  const uid = await userId("dana");
+  const key = `nook:library:${uid}`;
+  const before = await a.evaluate((k) => (JSON.parse(localStorage.getItem(k) ?? "[]") as unknown[]).length, key);
+  const addItem = async (p: Page, t: string) => {
+    await addText(p, t, 100, 100 + Math.random() * 300);
+    await p.locator("canvas.excalidraw__canvas.interactive").click({ position: { x: 700, y: 500 } });
+    await p.keyboard.press("Control+a");
+    const open = await p.locator(".layer-ui__library").count();
+    if (!open) await p.locator(".sidebar-trigger").first().click();
+    await p.locator(".library-unit__pulse").first().click({ force: true });
+  };
+  await addItem(a, "from tab a");
+  await a.waitForFunction(([k, n]) => (JSON.parse(localStorage.getItem(k as string) ?? "[]") as unknown[]).length === (n as number) + 1, [key, before] as const);
+  await addItem(bTab, "from tab b");
+  await bTab.waitForFunction(([k, n]) => (JSON.parse(localStorage.getItem(k as string) ?? "[]") as unknown[]).length === (n as number) + 2, [key, before] as const, { timeout: 5000 });
+  await f.close();
+});
+
+test("review 08-4: a library sent back in the address (#addLibrary=…) is taken in and kept", async () => {
+  const f = await fresh();
+  const { p } = f;
+  const id = await newDrawing(p);
+  const uid = await userId("dana");
+  const key = `nook:library:${uid}`;
+  const before = await p.evaluate((k) => (JSON.parse(localStorage.getItem(k) ?? "[]") as unknown[]).length, key);
+  const lib = {
+    type: "excalidrawlib",
+    version: 2,
+    source: "https://excalidraw.com",
+    libraryItems: [{ id: "libitem1", status: "published", created: 1, name: "Box", elements: [{ id: "lr", type: "rectangle", x: 0, y: 0, width: 50, height: 30, angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 2, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 3, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false }] }],
+  };
+  await p.route("https://libraries.excalidraw.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(lib) }));
+  p.on("dialog", (d) => void d.accept());
+  // As on coming back from libraries.excalidraw.com: a full page load, not a change of hash.
+  await p.goto(`${s.url}/trash`);
+  await p.goto(`${s.url}/d/${id}#addLibrary=${encodeURIComponent("https://libraries.excalidraw.com/libraries/test/box.excalidrawlib")}&token=t`);
+  await ready(p);
+  await p.waitForFunction(([k, n]) => (JSON.parse(localStorage.getItem(k as string) ?? "[]") as unknown[]).length === (n as number) + 1, [key, before] as const, { timeout: 10000 });
+  await f.close();
+});
+
+test("review 08-6: New note while a drawing is unsaved, cancelled, makes nothing", async () => {
+  const f = await fresh();
+  const { p } = f;
+  await newDrawing(p);
+  const count = async () => (await (await p.request.get(`${s.url}/api/notes`)).json()).entries.length;
+  const n = await count();
+  await addText(p, "unsaved");
+  await waitState(p, "dirty");
+  await p.getByTestId("new-note").click();
+  await p.getByTestId("confirm").waitFor();
+  await p.getByTestId("cancel").click();
+  await p.waitForTimeout(500);
+  assert.equal(await count(), n, "no orphan item");
+  await f.close();
+});
+
+test("review 03-4: when Excalidraw's script fails to load, Try again loads it", async () => {
+  const f = await fresh();
+  const ctx = f.p.context();
+  const { page: q } = await page(ctx);
+  let fail = true;
+  await q.route(/\/assets\/mount-[^/]+\.js$/, (r) => (fail ? r.abort() : r.continue()));
+  await f.p.getByTestId("new-drawing").click();
+  await ready(f.p);
+  const id = /\/d\/([a-z2-7]{24})/.exec(f.p.url())![1];
+  await q.goto(`${s.url}/d/${id}`);
+  await q.getByTestId("drawing-retry").waitFor();
+  fail = false;
+  await q.getByTestId("drawing-retry").click();
+  await ready(q);
+  await f.close();
 });

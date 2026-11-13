@@ -468,3 +468,13 @@ test("a drawing's save, stopped after each step: the old drawing or the new one"
     assert.equal((await saveDrawing(c2, d.id, scene([rect("a", 3)]), sha(want))).statusCode, 200);
   }
 });
+
+test("review 18-4: a note saved as new from a drawing's id takes no photos, so its photos are missing", async () => {
+  const { c } = await setup();
+  const d = await newDrawing(c);
+  const r = await c.saveAsNew("# From a draft\n\n![p](note.assets/p.png)\n", d.id);
+  assert.equal(r.statusCode, 201, r.body);
+  assert.equal(r.json().photosMissing, true, "a drawing is not a note's source of photos");
+  const n = await c.create("Has photos");
+  assert.equal((await c.saveAsNew("![p](note.assets/p.png)\n", n.id)).json().photosMissing, false, "a note source still counts");
+});

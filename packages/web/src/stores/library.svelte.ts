@@ -124,9 +124,11 @@ export const library = {
     return s.versionsOf;
   },
   async loadHistory(id: string): Promise<void> {
-    Object.assign(s, { picked: null, pickedText: null });
+    // Another item's versions never stay listed under this one (review, 24-4).
+    Object.assign(s, { picked: null, pickedText: null, versions: [] });
     s.versionsOf = id;
-    s.versions = (await api().history(id)).versions;
+    const versions = (await api().history(id)).versions;
+    if (s.versionsOf === id) s.versions = versions;
   },
   async readVersion(id: string, version: string): Promise<string> {
     return (await api().version(id, version)).text;

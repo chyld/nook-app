@@ -36,9 +36,10 @@ npm run build               # the browser bundle into packages/web/dist
 NOTES_DATA=/tmp/notes NOTES_ADMIN_SOCKET=/tmp/notes-admin.sock npm start   # the server on :3000
 ```
 
-The last full run (2026-11-12, after drawings, `SPEC-DRAWINGS.md`): core 99, server 74, web 74,
-e2e 70 (the seven journeys, 17 table-cell cases, 12 cases of the code review, 22 of the review
-of alpha's changes and 12 of drawings), all passing; typecheck and lint clean.
+The last full run (2026-11-12, after drawings, `SPEC-DRAWINGS.md`, and the fixes of their code
+review): core 99, server 75, web 83, e2e 78 (the seven journeys, 17 table-cell cases, 12 cases
+of the code review, 22 of the review of alpha's changes and 20 of drawings), all passing;
+typecheck and lint clean.
 
 The build reports the size of Excalidraw's script (`mount-*.js`, about 1.3 MB, with further
 chunks for Mermaid, KaTeX and the like): it and its CSS are requested only when a drawing is

@@ -25,7 +25,10 @@
     if (!library.loaded) void library.refresh();
   });
   $effect(() => {
-    if (library.kindOf(id) === "drawing") void router.go(`/d/${id}/history`, { replace: true, force: true });
+    const k = library.kindOf(id);
+    if (k === "drawing") void router.go(`/d/${id}/history`, { replace: true, force: true });
+    // Not in a list narrowed by a search or a tag: one read says (review, 5).
+    else if (k === null && library.noteStatus(id) === "unknown") void library.lookup(id);
   });
   function pick(v: string) {
     void library.pickVersion(id, v).catch((e) => toasts.push(`This version could not be read: ${e instanceof Error ? e.message : ""}`, "error"));

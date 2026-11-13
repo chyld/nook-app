@@ -55,9 +55,18 @@
       } else timer = null;
     }, THROTTLE);
   }
+  /** Tells the store now, from the scene as it is. Excalidraw reports a change only after
+   *  React has drawn it, so a change made in the same task as Save or leaving may not have
+   *  been reported yet: the store always reads the live scene (review, 13-2). */
   function flush() {
-    if (pending) tell();
+    if (!ready) return;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    tell();
   }
+
+  /** How long the drawing may take to become ready before the screen says it failed. */
+  const READY_LIMIT = 60_000;
 
   const dark = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -79,22 +88,40 @@
     if (gone || !host) return;
     script = "idle";
     const uid = session.user?.id ?? null;
-    const h = m.mountDrawing(host, {
+    const failed = () => {
+      if (gone || ready) return;
+      handle?.unmount();
+      handle = null;
+      script = "failed";
+    };
+    let h: DrawingHandle;
+    try {
+      h = m.mountDrawing(host, {
       scene,
       theme: dark() ? "dark" : "light",
       libraryKey: uid ? m.libraryStorageKey(uid) : null,
       libraryReturnUrl: `${location.origin}/d/${id}`,
       onChange: changed,
       onLibraryNotKept: () => toasts.push("The shape library was not kept: this browser refused to store it (its storage is full or turned off).", "warn", 8000),
-    });
+        onFailed: failed,
+      });
+    } catch {
+      failed();
+      return;
+    }
     handle = h;
+    // A drawing that never becomes ready (Excalidraw failed inside) says so (review, 02-7).
+    const limit = setTimeout(failed, READY_LIMIT);
     await h.ready;
-    if (gone) return;
+    clearTimeout(limit);
+    // `failed` may have run meanwhile (an error inside Excalidraw, or the limit).
+    if (gone || (script as string) === "failed") return;
     // Ready (4.3): the store takes its baseline as the view registers.
     editor.register({
       getText: () => editor.drawingText(),
       setText: () => {},
       flush,
+      isReady: () => ready,
       scene: () => h.scene(),
       load: async (sc) => {
         ready = false;
@@ -132,12 +159,14 @@
       editor.flushDraft();
       if (editor.unsaved()) e.preventDefault();
     };
-    // 3.3: Ctrl+S saves to Nook; Excalidraw never sees it.
+    // 3.3: Ctrl+S saves to Nook; Excalidraw never sees it. Only a ready drawing is saved (the
+    // store checks too), with a title or tag still being typed taken in first (review, 24-2).
     const keys = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
         e.preventDefault();
         e.stopPropagation();
-        void editor.save();
+        if (!ready) return;
+        void save();
       }
     };
     window.addEventListener("beforeunload", unload);
@@ -159,6 +188,8 @@
   });
 
   async function save() {
+    if (editingTitle) endTitle(true);
+    if (tagText) addTag();
     flush();
     await editor.save();
   }
@@ -229,13 +260,13 @@
           <!-- svelte-ignore a11y_autofocus -->
           <input class="title-input" aria-label="Title" maxlength="300" data-testid="note-title" bind:value={titleText} autofocus onblur={() => endTitle(true)} onkeydown={(e) => (e.key === "Enter" ? (e.preventDefault(), endTitle(true)) : e.key === "Escape" ? (e.preventDefault(), endTitle(false)) : null)} />
         {:else}
-          <button type="button" class="title" data-testid="note-title" title="Click to change the title" disabled={editor.loading || broken} onclick={startTitle}>{editor.loading ? "" : title}</button>
+          <button type="button" class="title" data-testid="note-title" title="Click to change the title" disabled={!ready} onclick={startTitle}>{editor.loading ? "" : title}</button>
         {/if}
         <div class="tags">
           {#each tags as t (t)}
             <span data-testid="tag" data-tag={t}><Chip hue={tagHue(t)}>{t}<button type="button" class="x" data-testid="tag-remove" aria-label={`Remove the tag ${t}`} onclick={() => editor.setNook({ tags: tags.filter((x) => x !== t) })}>×</button></Chip></span>
           {/each}
-          <input class="taginput" placeholder="+ tag" maxlength="30" aria-label="Add a tag" autocapitalize="none" autocomplete="off" spellcheck="false" data-testid="tag-input" disabled={editor.loading || broken} value={tagText} oninput={tagInput} onkeydown={tagKey} onblur={addTag} />
+          <input class="taginput" placeholder="+ tag" maxlength="30" aria-label="Add a tag" autocapitalize="none" autocomplete="off" spellcheck="false" data-testid="tag-input" disabled={!ready} value={tagText} oninput={tagInput} onkeydown={tagKey} onblur={addTag} />
         </div>
       </div>
     </div>

@@ -321,7 +321,8 @@ export class UserSpace {
         if (source) break;
         const dir = this.notePath(from, "dir", where);
         const st = await lstatOrNull(dir);
-        if (st?.isDirectory()) source = this.notePath(from, "note.assets", where);
+        // Only a note has photos: a drawing's id is not a source (review, 18-4).
+        if (st?.isDirectory() && (await this.kindOf(from, where))?.kind === "note") source = this.notePath(from, "note.assets", where);
       }
     }
     const usesPhotos = /\]\(\s*<?note\.assets\//.test(text);

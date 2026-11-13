@@ -20,10 +20,12 @@
   });
 
   async function newItem(kind: Kind) {
+    // Asked first, so cancelling leaves no empty item behind (review, 08-6).
+    if (!(await router.mayLeave())) return;
     try {
       const id = await library.create(undefined, kind);
       prefs.setSheet(false);
-      await router.go(itemPath(kind, id));
+      await router.go(itemPath(kind, id), { force: true });
     } catch (e) {
       toasts.push(`The ${kind} could not be made: ${e instanceof Error ? e.message : ""}`, "error");
     }
