@@ -109,7 +109,17 @@ curl -sS -X POST "https://localhost:9988/api/agent/v1/items?title=Shopping&tags=
   -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" --data-binary '- oats'
 ```
 
-(With the certificate Caddy makes for `localhost` or an IP address, `curl` needs `-k`.)
+**The certificate.** Without a domain name (the default, at `localhost` or the server's IP
+address), Caddy uses a certificate it makes itself, which no program verifies. A browser asks
+you once; an agent stops, and a careful one will not even read the guide. Tell it so when you
+give it the token:
+
+> It's my own server with Caddy's self-signed certificate. I accept that. Use `curl -k` for
+> every request to it.
+
+The guide says the same. The traffic is still encrypted; what is skipped is the proof that the
+agent is talking to your server. To make the question go away, give the server a domain name
+(`SITE_ADDRESS` in `.env`, as above): the certificate is then an ordinary one.
 
 What to know:
 

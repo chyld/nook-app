@@ -1091,7 +1091,7 @@ test("the guide: it names every route, every error code and what a token cannot 
     const shape = d.url.replace(":id", "$ID").replace(":version", "$VERSION");
     assert.ok(guide.includes(`http://${HOST}${shape}`), `${d.method} ${d.url}`);
   }
-  for (const word of ["delete", "trash", "restore", "photo", DRAWING_TYPE, "text/markdown", "2 MB", "25 MB", "If-Match", "--data-binary"]) assert.ok(guide.includes(word), word);
+  for (const word of ["delete", "trash", "restore", "photo", DRAWING_TYPE, "text/markdown", "2 MB", "25 MB", "If-Match", "--data-binary", "Caddy Local Authority", "`-k`"]) assert.ok(guide.includes(word), word);
   // The example drawing is a drawing a save accepts, with its bindings both ways.
   const example = JSON.parse([...guide.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]).find((t) => t.includes('"excalidraw"'))!);
   const byId = new Map<string, Record<string, unknown>>(example.elements.map((e: { id: string }) => [e.id, e]));
