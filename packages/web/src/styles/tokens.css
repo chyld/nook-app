@@ -64,6 +64,9 @@
     --c-pink: #f0388f;
     --c-orange: #ff8a1f;
     --c-yellow: #ffcf33;
+    /* The lamp button (New drawing): the logo's yellow, its hover shade, and the ink on both. */
+    --c-yellow-strong: #ffc21a;
+    --c-yellow-ink: #3a2c00;
     --c-green: #10b981;
     --c-sky: #1c9bf0;
 

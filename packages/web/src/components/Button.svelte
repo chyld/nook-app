@@ -1,8 +1,9 @@
 <script lang="ts">
-  // SPEC2 10: Button (primary, plain, quiet, danger, icon).
+  // SPEC2 10: Button (primary, plain, quiet, danger, icon), and lamp: the yellow of the logo's
+  // lamp, for New drawing.
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
-  type Props = HTMLButtonAttributes & { variant?: "primary" | "plain" | "quiet" | "danger" | "icon"; small?: boolean; pressed?: boolean | undefined; children?: Snippet; keepFocus?: boolean };
+  type Props = HTMLButtonAttributes & { variant?: "primary" | "plain" | "quiet" | "danger" | "icon" | "lamp"; small?: boolean; pressed?: boolean | undefined; children?: Snippet; keepFocus?: boolean };
   let { variant = "plain", small = false, pressed = undefined, children, keepFocus = false, type = "button", ...rest }: Props = $props();
 </script>
 
@@ -55,6 +56,16 @@
   }
   .primary:hover:not(:disabled) {
     background: var(--accent-strong);
+  }
+  .lamp {
+    border-color: var(--c-yellow);
+    background: var(--c-yellow);
+    color: var(--c-yellow-ink);
+    font-weight: 650;
+  }
+  .lamp:hover:not(:disabled) {
+    border-color: var(--c-yellow-strong);
+    background: var(--c-yellow-strong);
   }
   .quiet {
     border-color: transparent;

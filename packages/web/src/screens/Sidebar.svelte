@@ -49,7 +49,7 @@
   </div>
   <div class="new">
     <Button variant="primary" data-testid="new-note" onclick={() => newItem("note")}><Icon name="plus" size={16} /> New note</Button>
-    <Button data-testid="new-drawing" onclick={() => newItem("drawing")}><Icon name="pen" size={16} /> New drawing</Button>
+    <Button variant="lamp" data-testid="new-drawing" onclick={() => newItem("drawing")}><Icon name="pen" size={16} /> New drawing</Button>
   </div>
   <label class="search">
     <Icon name="search" size={16} />
