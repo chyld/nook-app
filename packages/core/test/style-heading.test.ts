@@ -154,22 +154,48 @@ test("after a block change the caret stays in its block, with other text below",
   }
 });
 
-test("a style waiting at the caret is kept when the line becomes a heading", () => {
-  const r = steps("hello¦", [{ type: "applyStyle", style: BIG }, { type: "setBlock", kind: "h3" }, type("!")]);
-  assert.equal(r.out, "### hello[**!¦**]{size=20pt color=red}");
-  // A waiting style that names no size takes the new block's size, not the old one's.
-  assert.equal(steps("## Alpha¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "h3" }, type("B")]).out, "### Alpha[B¦]{color=red}");
-  assert.equal(steps("## Alpha¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "paragraph" }, type("B")]).out, "Alpha[B¦]{color=red}");
+test("a look waiting at the caret is the line's too when a block or a list is chosen", () => {
+  const bold: Intent = { type: "setMark", change: { kind: "bold", on: true } };
+  const green: Intent = { type: "setMark", change: { kind: "color", value: "green" } };
+  // The complaint: a look made with the toolbar at a caret (and shown as the selected style), then Quote.
+  assert.equal(one("hello¦", [bold, green, Q]), "> [**hello¦**]{color=green}");
+  assert.equal(one("hello¦", [bold, green, Q, type("!")]), "> [**hello!¦**]{color=green}", "and it goes on for what is typed");
+  // A saved style, with each block and list, and the caret anywhere in the line.
+  assert.equal(one("hel¦lo", [{ type: "applyStyle", style: BIG }, Q]), "> [**hel¦lo**]{size=20pt color=red}");
+  assert.equal(one("hello¦", [{ type: "applyStyle", style: BIG }, { type: "setBlock", kind: "h3" }, type("!")]), "### **hello!¦**\n{size=20pt color=red}");
+  assert.equal(one("hello¦", [{ type: "applyStyle", style: RED }, list("bullet")]), "- [hello¦]{color=red}");
+  assert.equal(one("hello¦", [{ type: "applyStyle", style: BIG }, list("task"), type("!")]), "- [ ] [**hello!¦**]{size=20pt color=red}");
+  assert.equal(one("¦hello", [{ type: "applyStyle", style: BIG }, list("ordered")]), "1. [**¦hello**]{size=20pt color=red}");
+  assert.equal(one("before\n\nhello¦\n\nafter", [{ type: "applyStyle", style: BIG }, Q]), "before\n\n> [**hello¦**]{size=20pt color=red}\n\nafter", "only its own line");
+  // Out of a block as into one.
+  assert.equal(one("> hello¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "paragraph" }]), "hello¦\n{color=red}");
+  assert.equal(one("- hello¦", [{ type: "applyStyle", style: RED }, list("none")]), "hello¦\n{color=red}");
+  // A style that names no size takes the new block's size, not the old one's.
+  assert.equal(one("## Alpha¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "h3" }, type("B")]), "### AlphaB¦\n{color=red}");
+  assert.equal(one("## Alpha¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "paragraph" }, type("B")]), "AlphaB¦\n{color=red}");
   // A size the style names is kept, even when it equals the old block's own (Heading 2 is 18pt).
   const H2SIZE = style({ size: 18, color: "red" });
-  assert.equal(steps("## Alpha¦", [{ type: "applyStyle", style: H2SIZE }, { type: "setBlock", kind: "h3" }, type("B")]).out, "### Alpha[B¦]{size=18pt color=red}");
+  assert.equal(one("## Alpha¦", [{ type: "applyStyle", style: H2SIZE }, { type: "setBlock", kind: "h3" }, type("B")]), "### AlphaB¦\n{size=18pt color=red}");
   assert.equal(steps("## Alpha¦", [{ type: "applyStyle", style: H2SIZE }, { type: "enter" }, type("B")]).out, "## Alpha\n\nB¦\n{size=18pt color=red}");
-  // Code takes no style: nothing waits after the line becomes a code block.
+  // Code takes no style: the text is plain and nothing waits after the line becomes a code block.
   const code = steps("hello¦", [{ type: "applyStyle", style: BIG }, { type: "setBlock", kind: "code" }]);
+  assert.equal(code.out, "```\nhello¦\n```");
   assert.deepEqual(code.doc.typing, { marks: [], block: null });
-  // With no style waiting, nothing is left waiting.
-  const plain = reduce(parse("hello¦"), { type: "setBlock", kind: "h3" }, "rich");
+  // Once the line has the look, nothing is left waiting: what is typed next takes it from the text.
+  assert.deepEqual(steps("hello¦", [bold, green, Q]).doc.typing, { marks: [], block: null });
+  // Inline code is not a look for a line: it goes on waiting for what is typed.
+  const code1: Intent = { type: "setMark", change: { kind: "code", on: true } };
+  assert.equal(one("hello¦", [code1, Q, type("x")]), "> hello`x¦`");
+  assert.equal(one("hello¦", [code1, bold, Q, type("x")]), "> **hello`x¦`**");
+  // The block or list the line already is: the look is given all the same.
+  assert.equal(one("hello¦", [bold, { type: "setBlock", kind: "paragraph" }]), "**hello¦**");
+  assert.equal(one("- hello¦", [bold, list("bullet")]), "- **hello¦**");
+  // A line that is only a picture has no look to take.
+  assert.equal(one("![a](x.png)¦", [green, Q]), "> ![a](x.png)¦");
+  // With no look waiting, the line is only its new block, and nothing is left waiting.
+  const plain = reduce(parse("hello¦"), Q, "rich");
   assert.ok(plain.ok);
+  assert.equal(plain.doc.text, "> hello");
   assert.deepEqual(plain.doc.typing, { marks: [], block: null });
 });
 

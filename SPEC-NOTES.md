@@ -624,3 +624,30 @@ quote was dropped. What changed, in `core`:
   new code block that is after the text, not on the closing fence's line.
 - **An image's width line is not a style.** A paragraph that is only an image, with
   `{width=...}` under it, is refused as a quote, a list item or a heading, as before.
+
+## A look waiting at the caret, and a block chosen there (2026-11-13)
+
+Departs from 7.4.3 and replaces "A style waiting at the caret outlives a change of block"
+above. The complaint: "I created a style and it was selected, then I chose a quote, and the
+quote was plain." With the caret in a line of text and nothing selected, the toolbar's Bold,
+colour and size, or a saved style, change no text: they wait for what is typed next
+(`typing.marks`). The toolbar shows that look as the caret's all the same, and a style saved
+from it shows as the selected one, so a quote, heading or list chosen then looked as if it
+dropped the style.
+
+- **A block or a list chosen at a caret with a look waiting gives the line that look**
+  (`withWaitingLook` and `lookOnBlock` in `reduce.ts`, from `setBlock` and `setList`): the
+  change of block is made, then each waiting property is set on the whole block the caret is
+  in, as it would be on a selection. Nothing is left waiting then: what is typed next takes
+  the look of the text before it, which now has it. A property that cannot be set there is a
+  skipped part with its reason. A block that is only a picture takes no look.
+- **A click into another block that has text clears a waiting look** (`keepsTyping` in
+  `field.ts`; 7.4.3 kept it for every plain click). The look was not chosen for that text
+  (Enter may have carried it there), the toolbar would show it as that text's, and a block
+  chosen there would give it to the line. A click in the same block, or on an empty line,
+  keeps it as before.
+- It is so for Normal text, the headings, Quote and the three lists, into them and out of
+  them. A code block takes no style: its text stays plain and nothing is left waiting.
+- On an empty line nothing changes: the block and the look both wait for the first letter.
+- A look that moving the caret with the keyboard has cleared (7.4.3) is not waiting, and the
+  toolbar does not show it: a block chosen then is plain, as before.

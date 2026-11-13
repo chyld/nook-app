@@ -87,6 +87,23 @@ export function intentSpecs(state: EditorState, intent: Intent, o: { sel?: Sel; 
   return { ok: true, specs, ...(skipped ? { skipped } : {}) };
 }
 
+/**
+ * After a change of block or list at a caret, the browser's own caret is put where the
+ * editor's is. A mouse click can leave the browser's caret on the line's element rather than in
+ * its text; when the line is then drawn again (a waiting size gone, markup added), the editor
+ * reads that stale place back as the start of the line, and what is typed next goes there.
+ */
+function placeCaret(view: EditorView): void {
+  const main = view.state.selection.main;
+  if (!main.empty || !view.hasFocus || view.composing) return;
+  try {
+    const at = view.domAtPos(main.head);
+    view.dom.ownerDocument.getSelection()?.collapse(at.node, at.offset);
+  } catch {
+    // The place is not drawn (off screen): the editor's caret stands as it is.
+  }
+}
+
 /** Applies an intent; returns false when it was refused. */
 export function dispatchIntent(view: EditorView, intent: Intent, o: { sel?: Sel; still?: boolean } = {}): boolean {
   const t0 = performance.now();
@@ -96,6 +113,7 @@ export function dispatchIntent(view: EditorView, intent: Intent, o: { sel?: Sel;
     return false;
   }
   view.dispatch(r.specs[0]);
+  if (intent.type === "setBlock" || intent.type === "setList") placeCaret(view);
   if (r.skipped) hooks.message(r.skipped, "info");
   // `then` is applied as its own undo step, against the text now on screen.
   if (r.specs.length > 1) {

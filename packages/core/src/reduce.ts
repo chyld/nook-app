@@ -252,6 +252,56 @@ function keepingStyle(text: string, from: number, to: number, change: (t: string
   return { ok: true, text: cur, from: p, to: p };
 }
 
+/**
+ * The look waiting at the caret, given to the block the caret is in (its text, not its code):
+ * the toolbar shows that look as the caret's, so a block chosen there takes it. One property
+ * after another, as `useStyle` does for a selection; a property that cannot be set is skipped
+ * with its reason. The caret stays after the visible character it is after.
+ */
+function lookOnBlock(text: string, at: number, marks: Change[]): { text: string; at: number; reasons: string[] } | null {
+  let m = buildModel(text);
+  // A block of text: not one that is only pictures, which have no look to take.
+  const b = touchedBlocks(m, at, at).find((x) => (x.info.kind === "paragraph" || x.info.kind === "heading") && m.chars.slice(x.va, x.vb).some((c) => c.kind === "text"));
+  if (!b) return null;
+  const before = m.chars.filter((c) => c.end <= at).length;
+  const n = m.chars.length;
+  let cur = text;
+  const reasons: string[] = [];
+  for (const c of marks) {
+    if (c.kind === "code" || c.kind === "link" || c.kind === "size-step") continue;
+    const next = applyStyle(cur, m.chars[b.va].start, m.chars[b.vb - 1].end, c);
+    if (!next.ok) {
+      reasons.push(next.reason);
+      continue;
+    }
+    const nm = buildModel(next.text);
+    if (nm.chars.length !== n) {
+      reasons.push("part of the look could not be set here");
+      continue;
+    }
+    cur = next.text;
+    m = nm;
+    reasons.push(...next.skipped.reasons);
+  }
+  const p = before > b.va && before <= b.vb ? m.chars[before - 1].end : m.chars[b.va].start;
+  return { text: cur, at: p, reasons: [...new Set(reasons)] };
+}
+
+/** `setBlock` and `setList` with a look waiting at a caret: the block's text takes it. Nothing
+ *  is left waiting then: what is typed next takes the look of the text before it, which now
+ *  has it. With no text to take it (an empty item), it goes on waiting. A waiting size that is
+ *  only a block's own is the new block's. */
+function withWaitingLook(out: Out, marks: Change[]): Out {
+  const size = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
+  const now = marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: size, own: true } : c));
+  const look = lookOnBlock(out.text, out.sel.head, now);
+  if (!look) return { ...out, typing: { marks: now, block: null } };
+  const skipped = [...(out.skipped?.reasons ?? []), ...look.reasons];
+  // What a line does not take (inline code is for a stretch of text, not a look) goes on waiting.
+  const still = now.filter((c) => c.kind === "code" || c.kind === "link" || c.kind === "size-step");
+  return { ...out, text: look.text, sel: caret(look.at), typing: { marks: still, block: null }, ...(skipped.length ? { skipped: { count: skipped.length, reasons: skipped } } : {}) };
+}
+
 /** Version 1's `change()`: whatever the block had goes first, then the new style. */
 function changeBlock(t: string, f: number, to: number, kind: BlockTarget): BlockResult {
   if (blockStyleAt(t, f, to) === kind) return { ok: true, text: t, from: f, to };
@@ -299,13 +349,9 @@ function setBlock(doc: Doc, kind: BlockTarget, mode: Mode): Step {
     }
   }
   const out = fromRange(changeBlock(text, from, to, kind), sel.anchor > sel.head);
-  // A style waiting at the caret is for what is typed next, in whichever block the line now is;
-  // code takes no style, so nothing is left waiting there. A waiting size that is only the old
-  // block's own (a style that names no size) becomes the new block's.
-  if (empty && isOut(out) && doc.typing.marks.length && kind !== "code") {
-    const now = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
-    out.typing = { marks: doc.typing.marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: now, own: true } : c)), block: null };
-  }
+  // A look waiting at the caret is the line's too, in whichever block the line now is, and goes
+  // on waiting for what is typed next; code takes no style, so nothing is left waiting there.
+  if (empty && isOut(out) && doc.typing.marks.length && kind !== "code") return withWaitingLook(out, doc.typing.marks);
   return out;
 }
 
@@ -362,13 +408,11 @@ function setList(doc: Doc, kind: ListKind): Step {
   const to = Math.max(doc.sel.anchor, doc.sel.head);
   const now = listAt(doc.text, from, to);
   // Intents set a value; `toggleList` toggles (7.3).
-  if (kind === now) return { text: doc.text, sel: doc.sel };
+  // (The list it already is: only a look waiting at the caret changes anything, as `setBlock`.)
+  if (kind === now) return from === to && doc.typing.marks.length ? withWaitingLook({ text: doc.text, sel: doc.sel }, doc.typing.marks) : { text: doc.text, sel: doc.sel };
   const out = listOn(doc.text, doc.sel, kind === "none" ? (now as Exclude<ListKind, "none">) : kind);
-  // A style waiting at the caret is for what is typed next, in the item or out of it (as `setBlock`).
-  if (from === to && isOut(out) && doc.typing.marks.length) {
-    const size = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
-    out.typing = { marks: doc.typing.marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: size, own: true } : c)), block: null };
-  }
+  // A look waiting at the caret is the item's too, and goes on waiting (as `setBlock`).
+  if (from === to && isOut(out) && doc.typing.marks.length) return withWaitingLook(out, doc.typing.marks);
   return out;
 }
 

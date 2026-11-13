@@ -50,11 +50,15 @@ function build(model: Model, typing: Typing, rich: boolean, raw: number[], opts:
 }
 
 /** A key move or a selection clears `typing`; a plain click that leaves the selection empty
- *  does not (7.4.3). Undo and redo clear it. */
-function keepsTyping(tr: Transaction): boolean {
+ *  does not (7.4.3), unless it goes into another block that has text: the look waiting was not
+ *  chosen for that text, and the toolbar would show it as that text's. Undo and redo clear it. */
+function keepsTyping(tr: Transaction, model: Model): boolean {
   if (tr.docChanged) return false;
   if (!tr.selection) return true;
-  return tr.isUserEvent("select.pointer") && tr.newSelection.main.empty;
+  if (!(tr.isUserEvent("select.pointer") && tr.newSelection.main.empty)) return false;
+  const blockAt = (p: number) => model.blocks.findIndex((b) => b.vb > b.va && p >= b.info.range.start && p <= b.info.range.end);
+  const to = blockAt(tr.newSelection.main.head);
+  return to < 0 || to === blockAt(tr.startState.selection.main.head);
 }
 
 export const editorField = StateField.define<EditorValue>({
@@ -77,7 +81,7 @@ export const editorField = StateField.define<EditorValue>({
       else if (e.is(tableAsText)) raw.push(e.value);
     }
     if (tr.docChanged) model = given && given.text.length === tr.newDoc.length ? given : buildModel(tr.newDoc.toString());
-    if (!typingSet && !keepsTyping(tr)) typing = NO_TYPING;
+    if (!typingSet && !keepsTyping(tr, value.model)) typing = NO_TYPING;
     if (!rich) typing = NO_TYPING;
     // A table shown as text closes when the caret leaves it.
     const head = tr.newSelection.main.head;
