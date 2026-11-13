@@ -1,6 +1,6 @@
 # Nook agents: specification
 
-Draft 2, 2026-11-12. Not built. Section 14 says what changed since draft 1.
+Draft 3, 2026-11-12. Not built. Section 14 says what changed since draft 1.
 
 This document adds an interface for AI agents to the app that `SPEC2.md` and
 `SPEC-DRAWINGS.md` describe. Where it is silent, those documents apply. "SPEC2 4.4" means that
@@ -16,8 +16,10 @@ save that person's notes and drawings over HTTP. It cannot delete anything.
 
 1. **Agents use an HTTP interface,** not the web app's controls.
 2. **Agents create and save notes and drawings. They never delete.**
-3. **A simpler form for drawings is in this version** (section 6): an agent sends a short list
-   of shapes and arrows, and the server makes the Excalidraw file.
+3. **A simpler form for drawings is not in this version.** An agent sends a drawing as an
+   ordinary Excalidraw file. Section 6 keeps the design of a short form (a list of shapes and
+   arrows that the server turns into a scene), to be built only if agents' drawings come out
+   badly.
 
 ### 1.2 Proposed, for the owner to confirm
 
@@ -46,7 +48,7 @@ draft 1 against the code. Where they agreed, this draft follows them.
 
 ### 1.3 Not in this version
 
-A command-line tool. An MCP server. Photos added or read by an agent. The trash. Patching.
+A command-line tool. An MCP server. The short form for drawings (section 6). Photos added or read by an agent. The trash. Patching.
 Keys that make a repeated create harmless (`Idempotency-Key`). Paging of the list. Telling the
 open web app that an agent changed something (the person sees it on the next list or save).
 
@@ -243,18 +245,19 @@ this server's address in every example. It holds:
 - that append without `If-Match` must not be sent again blindly when its answer is lost:
   read the note and look first, or use `If-Match`;
 - how to undo: read history, and save the old text;
-- for drawings: use the short form (section 6) to make one; to change one, read it, change
+- for drawings: to make one, start from the guide's example; to change one, read it, change
   the JSON, and save all of it, `files` included, or its images are refused as missing;
 - that a note's photos are lines such as `![](note.assets/…)`, which an agent keeps as they
   are and cannot open;
-- a complete small note, a complete short-form drawing, and a complete Excalidraw drawing;
+- a complete small note, and a complete small drawing (two rectangles with labels, a text,
+  and an arrow bound to both rectangles) with every value an element needs;
 - every error code of 5.8 with what to do about it;
 - what a token cannot do, said plainly, so an agent does not go looking: delete, trash,
   restore, photos.
 
 The page's text is one file in the repository, `packages/server/src/agent-guide.md`, with the
 address filled in when it is served. A test runs every `curl` example in it against a real
-server, and an `e2e` case opens both example drawings in the browser.
+server, and an `e2e` case opens the example drawing in the browser.
 
 ### 5.2 List and search: `GET /items?tag=&q=`
 
@@ -280,7 +283,7 @@ only. There is no restore: to bring a version back, the agent saves its text (5.
 A route of its own (the browser's `POST /api/notes` is not reused: no JSON form, no `from`).
 
 - The body is the document, with the type of its kind: `text/markdown` for a note,
-  `application/vnd.excalidraw+json` for a drawing, or the short form of section 6. A request
+  `application/vnd.excalidraw+json` for a drawing. A request
   with `text/markdown` and no body makes an empty note.
 - `title`, if given and not empty, is trimmed and must be at most 300 characters with no
   control characters, or the request is 422 `bad-title`. `tags` is a list separated by
@@ -361,7 +364,7 @@ does not, the hint is a general one for that status.
 | 413 | `too-large` | Over the kind's limit, or the route's; says the size and the limit |
 | 415 | `unsupported-type` | No body type, one that is not the item's kind, or append on a drawing |
 | 422 | `refused`, `not-utf8`, `not-json`, `not-excalidraw`, `broken-front-matter` | As a save in the browser |
-| 422 | `bad-tag`, `bad-title`, `empty`, `missing-image`, `bad-sketch` | 5.5, 3.3, section 6 |
+| 422 | `bad-tag`, `bad-title`, `empty`, `missing-image` | 5.5, 3.3 |
 | 428 | `no-revision` | A save without `If-Match` |
 | 429 | `busy` | Over a limit of 3.3 |
 | 500, 503 | `server`, `unavailable` | Nothing is known to have been saved: read before sending again |
@@ -369,9 +372,13 @@ does not, the hint is a general one for that status.
 The most common mistake, `curl -d` with no `Content-Type`, is the 415, and its hint names the
 three types.
 
-## 6. The short form for drawings
+## 6. Later: a short form for drawings
 
-An agent writing Excalidraw by hand gets the many values of each element subtly wrong. The
+**Nothing in this section is built in this version** (1.1, 3). It is a design kept ready, and
+no other section depends on it. It is built only if drawings that agents write by hand come
+out badly; "is" below means "would be".
+
+An agent writing Excalidraw by hand may get the many values of each element subtly wrong. The
 short form is a third body type for create, `application/vnd.nook.sketch+json`, which the
 server turns into an ordinary `drawing.excalidraw`. It is for making a drawing only: reading
 always gives the Excalidraw file, and a save takes only that.
@@ -442,28 +449,27 @@ If `restoreElements` cannot do what 6.3 says, the estimate is made closer and 6.
 ## 7. Contract and server
 
 - `contract`: `auth` as in 3.1 on every route; `LIMITS.agents` (20), `agentChanges` (60),
-  `agentBytesPerDay` (300 MB), `agentHistory` (10), `agentDrawingHistory` (5), and the limits
-  of 6.1; `PATTERNS.agentToken`; `SKETCH_TYPE`; `Agent`; `agent` in `Entry` and
+  `agentBytesPerDay` (300 MB), `agentHistory` (10), `agentDrawingHistory` (5);
+  `PATTERNS.agentToken`; `Agent`; `agent` in `Entry` and
   `HistoryEntry`; the routes of 2.2 and of section 5; `ErrorBody` allows `error.hint`.
 - `errors.ts`: `HttpError` takes a hint and puts it in `error`; `CODES` gains 428.
 - A new `agents.ts` beside `accounts.ts`: the table, making, revoking, lookup by hash with
   the user check, the hourly `used`, removal with the user and with a password change; the
   counts of 3.3.
-- `app.ts`: 3.1 and 3.2 in `onRequest`, `preHandler` and the not-found handler; a parser for
-  the short form's type that keeps the raw bytes; the handlers of section 5, which call the
+- `app.ts`: 3.1 and 3.2 in `onRequest`, `preHandler` and the not-found handler; the handlers
+  of section 5, which call the
   same `space` functions the browser's routes do, with the writer's name.
 - `space.ts`: `save`, `saveAsNew` and `create` take a writer (`string | null`); 4.3;
   `append`; the checks of 3.3; `agent` in the index's facts, `entryOf` and `history`;
   `history` and `version` over both folders. `layout.ts` as in 4.2.
 - `core`: `newNoteText` and `yamlQuote` move here from `space.ts` and gain tags (`fmwriter`
   cannot write `created`, so it is not used); a function that adds `nook` to a drawing's JSON
-  as 5.5 says; `sketch.ts`.
+  as 5.5 says.
 
 ## 8. The web app
 
 - Account screen: the Agents section of 2.2, and the line about passwords of 2.1.
 - Sidebar, editor header, drawing header, the two history screens: 4.1.
-- Drawing screen: 6.3.
 - The API client gains the three routes of 2.2. Nothing else in the stores changes: an
   agent's save reaches an open note as another tab's would, as a 409 on the person's next
   save, with **Keep mine** and **Take theirs**.
@@ -475,13 +481,13 @@ If `restoreElements` cannot do what 6.3 says, the estimate is made closer and 6.
 
 | Level | What |
 |---|---|
-| `core` | Front matter before a body: with and without a title and tags; quoting. `nook` added to a drawing, the other keys kept. `sketch.ts`: each shape type; default and given sizes; a label; an arrow's ends and bindings; every fault of 6.1 with its path; the same sketch and the same `random` give the same bytes. |
+| `core` | Front matter before a body: with and without a title and tags; quoting. `nook` added to a drawing, the other keys kept. |
 | `server`, tokens | Make, list, revoke; the name's rules and the limit of 20; a revoked token is 401 at once; one person cannot see or revoke another's; removing a user, changing a password and `reset-password` remove the tokens; a token of a removed user is 401; the token is in no log line and only its hash is on disk. |
 | `server`, the boundary | 3.4. |
-| `server`, the interface | List; both reads, with the `ETag`; history; create of each kind and of the short form, with and without `title` and `tags`, with and without front matter or `nook`; each row of 5.8 with its hint; save, 409 with `current`, 428, a quoted `If-Match`; append with and without `If-Match`, for LF and CRLF notes, an empty note, a note ending in empty lines, a note with broken front matter; 410; each limit of 3.3. Every `curl` example of the guide. |
+| `server`, the interface | List; both reads, with the `ETag`; history; create of each kind, with and without `title` and `tags`, with and without front matter or `nook`; each row of 5.8 with its hint; save, 409 with `current`, 428, a quoted `If-Match`; append with and without `If-Match`, for LF and CRLF notes, an empty note, a note ending in empty lines, a note with broken front matter; 410; each limit of 3.3. Every `curl` example of the guide. |
 | `server`, writers | `agent` in entries and history after each mix of person and agent saves. **A note a person saved 50 times, then saved 51 times by an agent, still has every one of the person's versions, by name, and the text the agent first replaced.** The same for a drawing. A person's save after an agent's removes the oldest of the person's beyond 50. A hand edit after an agent's save is a person's. A missing and a broken `writers.json`. A crash after each step of 4.3 is never an agent's text where a person's is. Trash and restore keep both folders. |
 | `web` stores | The Agents section through the API client with a fake server. |
-| `e2e` | Make a token on the Account screen and copy it; with it, from outside the browser, create a note, an Excalidraw drawing and a short-form drawing; all appear in the sidebar with the agent's mark and open; the short-form drawing shows its shapes, opens not unsaved, and is unchanged after a save and a reload. Append to a note open in the browser, then save in the browser and get the conflict. Revoke, and the next request is 401. |
+| `e2e` | Make a token on the Account screen and copy it; with it, from outside the browser, create a note and the guide's example drawing; both appear in the sidebar with the agent's mark and open; the drawing shows its shapes and labels, opens not unsaved, and is unchanged after a save and a reload. Append to a note open in the browser, then save in the browser and get the conflict. Revoke, and the next request is 401. |
 
 Existing tests that compare a whole entry gain `agent: null`; those that read `auth` from a
 route read the new values. No other existing test changes.
@@ -493,13 +499,9 @@ route read the new values. No other existing test changes.
 3. `server`: writers in `space.ts` (4.2, 4.3) for a person's saves, with every existing test
    still passing.
 4. `core`: front matter and `nook`. `server`: the routes of section 5, the limits of 3.3, the
-   guide without its short-form parts.
+   guide.
 5. `web`: the Agents section; the marks of 4.1.
-6. The first step of 6.4, and its result written down. Then `sketch.ts`, the short form in
-   create, 6.3, and the guide's short-form parts.
-7. `e2e`, then `README.md`, `SPEC-NOTES.md`, `PROGRESS.md`, and the changes to `SPEC2.md`.
-
-Steps 1 to 5 are a working interface without the short form.
+6. `e2e`, then `README.md`, `SPEC-NOTES.md`, `PROGRESS.md`, and the changes to `SPEC2.md`.
 
 ## 11. Risks
 
@@ -516,9 +518,9 @@ Steps 1 to 5 are a working interface without the short form.
   agents can still fill a disk, and only a person can remove what they made.
 - **A large drawing does not fit in an agent's context.** Reading gives the whole file,
   images included, and saving needs all of it back.
-- **The short form's text sizes are estimates** until a person saves the drawing (6.3).
-- **Nook's converter follows Excalidraw's format by hand.** An upgrade of Excalidraw is
-  checked by opening a short-form drawing, as stored drawings are checked.
+- **A drawing an agent writes by hand may open oddly or not at all.** The check on a save is
+  DRAWINGS 4.4's (valid JSON with `type` and `elements`) and 3.3's. The guide's example is
+  tested to open; if agents' drawings come out badly, section 6 is the remedy.
 
 ## 12. Changes this makes to SPEC2 and SPEC-DRAWINGS
 
@@ -526,7 +528,7 @@ SPEC2 4.2 (two more things in an item's folder). 4.4 (the steps, and what a requ
 remove). 4.6 (two folders; a version has a writer). 5 (tokens; three ways to be let in; where
 the `Origin` check applies; what a password change ends). 6 (the routes, `auth`, `agent` in
 entries, `hint`, 428). 9 (the Account screen; the marks). 11 (the ids of section 8).
-SPEC-DRAWINGS 4.2 (`nook.sketch`). 4.4 (agents' versions: 5). 5 (the short form's type).
+SPEC-DRAWINGS 4.4 (agents' versions: 5).
 
 ## 13. Open questions for the owner
 
@@ -537,8 +539,14 @@ SPEC-DRAWINGS 4.2 (`nook.sketch`). 4.4 (agents' versions: 5). 5 (the short form'
 
 ## 14. Changes since draft 1
 
+**Draft 3.** The owner took the short form for drawings back out of this version (1.1, 3)
+after the converter check showed its cost. Section 6 keeps the design; the body type, the
+`bad-sketch` code, `sketch.ts`, the change to the drawing screen and their tests and build
+step are gone from the other sections.
+
 **Draft 2.** From a review of draft 1 against the code by eight AI models (a ninth did not
-answer), a check of Excalidraw's converter in Node, and one decision by the owner (1.1, 3).
+answer), a check of Excalidraw's converter in Node, and one decision by the owner, since
+reversed (draft 3).
 
 - **History.** Draft 1's promise was false: the first agent save after a person's removed the
   person's oldest version, and a crash, a hand edit or a broken `writers.json` could file a
@@ -559,6 +567,6 @@ answer), a check of Excalidraw's converter in Node, and one decision by the owne
   mark and broken front matter (5.6).
 - **Reading history** and **reading the raw file with an `ETag`** are added (5.3, 5.4).
 - **Tokens** need a living user, and go with a password change or reset (2.1).
-- **The short form for drawings is in** (section 6), with Nook's own converter.
+- The short form for drawings was put in (section 6), with Nook's own converter.
 - Not taken: `Idempotency-Key`, paging, a public-address setting (5 says why the request's
   own address is used), reading a drawing without its images, photos.
