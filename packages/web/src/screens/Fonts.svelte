@@ -106,7 +106,7 @@
     <div class="mine" aria-label="Your fonts">
       {#each fonts.mine as f (f.slug)}
         <span class="chip" data-testid="font-row" data-slug={f.slug}>
-          <span style={familyStyle(f.family, "inherit")}>{f.family}</span>
+          <span style={familyStyle(f.family)}>{f.family}</span>
           <button type="button" class="x" data-testid="font-remove" title={`Remove ${f.family}`} aria-label={`Remove ${f.family}`} disabled={fonts.busy === f.slug} onclick={() => remove(f.slug)}>×</button>
         </span>
       {/each}

@@ -50,7 +50,7 @@
   const fontNow = $derived(st.font.mixed ? null : (st.font.value ?? noteFont ?? "serif"));
   // The person's own fonts first, then the built-in three, each part in alphabetical order.
   const fontItems = $derived([
-    ...[...myFonts].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })).map((f) => ({ value: f, label: f, style: familyStyle(f, "inherit"), selected: fontNow === f })),
+    ...[...myFonts].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })).map((f) => ({ value: f, label: f, style: familyStyle(f), selected: fontNow === f })),
     ...[
       ["mono", "Mono"],
       ["sans", "Sans"],

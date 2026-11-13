@@ -17,3 +17,10 @@ test("16: a font name cannot leave its CSS string", () => {
   const faces = previewFaces(HOSTILE.map((slug) => ({ slug })), (s) => `/api/fonts/preview/${s}`);
   for (const line of faces.split("\n")) assert.equal(outsideStrings(line), '@font-face { font-family: S; src: url(S) format(S); font-display: swap; }', line);
 });
+
+test("a font's name is shown in that font: the style is one the browser keeps", () => {
+  // `font-family: "X", inherit` is not valid CSS (a CSS-wide keyword cannot be in a list of
+  // families); the browser dropped it, and the font menu showed every name in the app's font.
+  assert.equal(familyStyle("Caveat Brush"), 'font-family: "Caveat Brush", var(--font-ui)');
+  assert.doesNotMatch(familyStyle("Caveat"), /\b(inherit|initial|unset|revert)\b/);
+});

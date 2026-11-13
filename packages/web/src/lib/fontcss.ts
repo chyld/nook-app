@@ -7,9 +7,11 @@ export function cssString(v: string): string {
   return `"${v.replace(/[\\"\n\r\f\u0000-\u001f\u007f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `)}"`;
 }
 
-/** The style attribute that shows a name in a family of the person's fonts. */
-export function familyStyle(family: string, fallback = "var(--font-ui)"): string {
-  return `font-family: ${cssString(family)}, ${fallback}`;
+/** The style attribute that shows a name in a family of the person's fonts, falling back to
+ *  the app's own font. (The fallback is a family, never `inherit`: a keyword like that is not
+ *  allowed in a list of families, and the browser then drops the whole declaration.) */
+export function familyStyle(family: string): string {
+  return `font-family: ${cssString(family)}, var(--font-ui)`;
 }
 
 /** The font faces of the catalogue's previews, each loaded from the app. */
