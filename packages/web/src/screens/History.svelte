@@ -20,7 +20,10 @@
   $effect(() => {
     void library.loadHistory(id).catch((e) => toasts.push(e.message, "error"));
   });
-  // A drawing's id: its own history screen (SPEC-DRAWINGS 6).
+  // A drawing's id: its own history screen (SPEC-DRAWINGS 6). The kind comes from the list.
+  $effect(() => {
+    if (!library.loaded) void library.refresh();
+  });
   $effect(() => {
     if (library.kindOf(id) === "drawing") void router.go(`/d/${id}/history`, { replace: true, force: true });
   });

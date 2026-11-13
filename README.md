@@ -1,15 +1,17 @@
 # Nook
 
 Nook is a notes app for a few people, each with private notes. Every note is one Markdown file on disk
-(the note format of `SPEC.md`, read by `noteformat/`). The specification is
-`SPEC2.md`; where the build departs from it, or the spec was silent, `SPEC-NOTES.md` says so.
-`PROGRESS.md` says what is done.
+(the note format of `SPEC.md`, read by `noteformat/`). A person can also make **drawings**,
+edited with [Excalidraw](https://excalidraw.com) running inside Nook; each drawing is one
+ordinary Excalidraw file on disk, its images inside it. The specification is `SPEC2.md`, and
+`SPEC-DRAWINGS.md` for drawings; where the build departs from them, or they were silent,
+`SPEC-NOTES.md` says so. `PROGRESS.md` says what is done.
 
 ```
   packages/contract/   API routes, shapes, limits, patterns (TypeBox)
   packages/core/       the editing core: version 1's routines, reduce, describe (pure TypeScript)
   packages/server/     Fastify app, storage, accounts, photos, fonts, styles, notes-admin
-  packages/web/        Svelte 5 app, CodeMirror 6 editor
+  packages/web/        Svelte 5 app, CodeMirror 6 editor; Excalidraw (React) for drawings, loaded on demand
   e2e/                 Playwright journeys
   noteformat/          the library that reads and renders the note format (used as it is)
   Dockerfile  compose.yaml  Caddyfile  .env.example  scripts/backup.sh  scripts/restore.sh
@@ -34,9 +36,14 @@ npm run build               # the browser bundle into packages/web/dist
 NOTES_DATA=/tmp/notes NOTES_ADMIN_SOCKET=/tmp/notes-admin.sock npm start   # the server on :3000
 ```
 
-The last full run (2026-11-12, after the fixes of the review of alpha's changes, `FIXES.md`):
-core 88, server 57, web 60, e2e 58 (the seven journeys, 17 table-cell cases, 12 cases of the
-code review and 22 of the review of alpha's changes), all passing; typecheck and lint clean.
+The last full run (2026-11-12, after drawings, `SPEC-DRAWINGS.md`): core 99, server 74, web 74,
+e2e 70 (the seven journeys, 17 table-cell cases, 12 cases of the code review, 22 of the review
+of alpha's changes and 12 of drawings), all passing; typecheck and lint clean.
+
+The build reports the size of Excalidraw's script (`mount-*.js`, about 1.3 MB, with further
+chunks for Mermaid, KaTeX and the like): it and its CSS are requested only when a drawing is
+first opened. Its fonts are copied into the bundle (`dist/assets/excalidraw/fonts/`), so no
+font is fetched from another address.
 
 ## Running it with Docker
 
@@ -98,18 +105,27 @@ config/users.json, sessions/, backup.json, tmp/
 cache/google-fonts.json, font-previews/, tmp/
 removed/<user-id>-<date>/
 users/<user-id>/notes/<note-id>/note.md, note.assets/<photo>, history/<version>.md
+users/<user-id>/notes/<drawing-id>/drawing.excalidraw, history/<version>.excalidraw
 users/<user-id>/trash/<note-id>/          (a note folder moved whole, plus trashed.json)
 users/<user-id>/fonts/<slug>/, styles.json, tmp/
 ```
 
 A note is a folder named by its id; its text is always `note.md` and its photos are always in
-`note.assets/`. Nothing is changed in place: every file is written in a `tmp/` folder, synced and
+`note.assets/`. A drawing is a folder of the same kind whose file is `drawing.excalidraw` (a
+folder with a `note.md` is a note); a drawing keeps its newest 20 versions, a note 50. A
+drawing's file is an ordinary Excalidraw file with one more key, `nook` (title, tags, date): it
+opens in excalidraw.com as it is. Nothing is changed in place: every file is written in a `tmp/` folder, synced and
 renamed into place.
 
 **Editing by hand.** A person with shell access may edit a `note.md` while the app runs; a
 browser holding the old text is told the note changed when it saves. To add a note by hand,
 make the folder elsewhere on the same disk under a new id (`notes-admin new-id`), with a
-`note.md` in it, and move it into `notes/` with `mv`.
+`note.md` in it, and move it into `notes/` with `mv`. A drawing is added the same way, with a
+file saved from excalidraw.com renamed `drawing.excalidraw`: it opens as `Untitled`, images
+included, and its first save writes it in Nook's form (the old bytes stay in its history).
+
+The shape library of drawings is kept in each browser's local storage (one per user), not on
+the server, so it is not in the backup.
 
 Accepted risks:
 
@@ -159,3 +175,9 @@ example `{ type: "setMark", change: { kind: "bold", on: true } }`,
 `{ type: "setBlock", kind: "h2" }`, `{ type: "setList", kind: "bullet" }`,
 `{ type: "insertText", text: "x" }`, `{ type: "enter" }` (or just `"enter"`),
 `{ type: "setMeta", key: "title", value: "New title" }`. See `SPEC-NOTES.md`.
+
+On the drawing screen, `window.__drawing` is `{ text(), addText(text, x, y),
+setBackground(colour), addImage(file) }`: `text()` is the file a save would write
+(`SPEC-DRAWINGS.md` 4.2); the others do what the person's own action would (`addImage` drops the
+file on the canvas). The element Excalidraw is in has `data-testid="drawing"` and
+`data-ready="true"` once the drawing is ready.

@@ -95,3 +95,29 @@ fix (to see each new test fail on it; not kept here). New tests: `core/test/chan
       e2e 58/58. `docker compose up -d --build` healthy at https://localhost; `node
       e2e/docker-smoke.ts` passed with a throwaway account, removed afterwards (its empty folder is
       in `removed/`, as `remove-user` does). README counts updated.
+
+## Drawings (2026-11-12, `SPEC-DRAWINGS.md` draft 5, branch `drawings`)
+
+Build order of SPEC-DRAWINGS section 9; one commit per step. What departs from the spec is in
+SPEC-NOTES.md, "Notes on SPEC-DRAWINGS.md".
+
+- [x] 1. The first step of section 2: Excalidraw 0.18.1 mounted from the production build under
+      the policy of 3.2 (drawing, text, an image, fonts from Nook, the library, an embedded page,
+      Mermaid). The policy blocked nothing; no Vite `define`; opening a scene changes no
+      element's version. `react`, `react-dom` 19.3.1 and `@excalidraw/excalidraw` 0.18.1 added
+      as exact versions.
+- [x] 2. `contract`: `kind` in entries, `Kind`, `DRAWING_TYPE`, the body kinds `document` and
+      `json-or-document`, `LIMITS.drawingBytes` (25 MB) and `drawingHistory` (20), the pages
+      `/d/:id` and `/d/:id/history`.
+- [x] 3. `core`: `drawing.ts` (`serializeDrawing`, `emptyDrawing`, `drawingFacts`, the checks of
+      a save, the signature of 4.3, `sceneOf`) and `core/test/drawing.test.ts` (11).
+- [x] 4. `server`: `layout.ts` and `space.ts` by kind, the body pipeline for the drawing type,
+      415 for the wrong kind, the policy in `app.ts`; `server/test/drawings.test.ts` (17).
+- [x] 5. `web`: the store, client and drafts by kind; `/d/<id>` and `/d/<id>/history`;
+      `drawing/mount.ts` and `DrawingScreen.svelte`; the library in local storage; the sidebar's
+      New drawing and drawing rows; `DrawingHistory.svelte`; trash rows by kind;
+      `web/test/drawings.test.ts` (12).
+- [x] 6. `e2e/drawings.test.ts` (12), README.md, SPEC-NOTES.md, this file, and the changes to
+      SPEC2.md (marked "(SPEC-DRAWINGS)").
+- [x] Full run (2026-11-12): typecheck and lint clean; core 99/99, server 74/74, web 74/74,
+      e2e 70/70. No Docker command was run: the running stack has not been rebuilt with drawings.

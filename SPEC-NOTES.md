@@ -398,3 +398,16 @@ Chromium through Playwright (with internet access). Found:
 - The test hook's `addImage(file)` drops the file on the canvas, as a person's drop;
   `addText(text, x, y)` adds a text element made by Excalidraw's `convertToExcalidrawElements`;
   `setBackground(colour)` sets `viewBackgroundColor`. Each is one undo step.
+
+## Section 8: the tests
+
+- The e2e cases find Nook's own controls by test id only. Excalidraw's controls have none, so
+  the cases that work inside it use its class names: its canvas
+  (`canvas.excalidraw__canvas.interactive`, for drops), the library button (`.sidebar-trigger`)
+  and the pending library item (`.library-unit__pulse`), and the library grid's items. A scene
+  file "loaded from disk" is dropped on the canvas: Chromium has the File System Access API, so
+  Excalidraw's Open menu uses the system's file picker, which a test cannot drive.
+- "An image added, saved, reloaded and seen" and the file from excalidraw.com check that the
+  image is drawn by counting red pixels in a screenshot of the drawing.
+- "No font comes from another address" counts the requests of Nook's own page (its main frame):
+  an embedded web page may fetch fonts in its own frame.

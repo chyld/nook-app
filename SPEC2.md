@@ -4,6 +4,10 @@ Version 2.0, 2026-11-12 (after four rounds of review). This says what the rebuil
 is written from scratch in a new folder, `v2/`. Nothing in `app/` is changed. Section 16 lists
 what changed since each earlier draft.
 
+**Drawings.** `SPEC-DRAWINGS.md` (draft 5, built 2026-11-12) adds drawings, edited with
+Excalidraw, beside notes. It changes the sections its section 11 lists; each change is marked
+here with "(SPEC-DRAWINGS)". Where this document and that one differ, that one wins.
+
 **"Version 1" means the app as it runs today** from `app/`. `DESIGN.md` and `EDITOR-PLAN.md` are
 older than the code and wrong in places; where they differ from the running app, the app wins.
 The differences that matter are listed in 1.2.
@@ -81,6 +85,8 @@ v2/
   `svelte-check`, `codemirror` and the `@codemirror/*` packages, `dompurify`, the two
   `@fontsource-variable` packages of section 10, `stylelint` with `postcss-html`, and for tests
   `playwright` and `fast-check`. Nothing else without the owner's agreement.
+- (SPEC-DRAWINGS) Also `react`, `react-dom` and `@excalidraw/excalidraw`, each at an exact
+  version; they are loaded only when a drawing is opened.
 
 ## 4. Storage
 
@@ -122,6 +128,9 @@ All sizes in this document are in bytes: 1 MB is 1,048,576 bytes.
       note.md
       note.assets/<photo file>
       history/<version>.md
+    notes/<drawing-id>/              (SPEC-DRAWINGS) a drawing, in the same id space
+      drawing.excalidraw
+      history/<version>.excalidraw
     trash/<note-id>/                 a note folder moved here whole, plus trashed.json
     fonts/<family-slug>/font.css, *.woff2
     styles.json
@@ -129,6 +138,10 @@ All sizes in this document are in bytes: 1 MB is 1,048,576 bytes.
 ```
 
 - `<user-id>` is 16 and `<note-id>` is 24 random characters from `a-z` and `2-7`.
+- (SPEC-DRAWINGS) **The main file decides the kind:** a folder with a regular file `note.md` is
+  a note; without one, a folder with a regular file `drawing.excalidraw` is a drawing; any other
+  folder is ignored. A drawing's images are inside its file. Trash, restore, emptying,
+  `removed/` and the backup move or copy whole folders, of either kind.
 - **A note is a folder named by its id.** The file is always `note.md` and its photos are always
   in `note.assets/`, so a photo's path in the text is always `note.assets/<file>` (format
   section 6, with the note name `note`).
@@ -190,6 +203,13 @@ sends the new bytes as the request body and the revision it started from in `If-
 A crash leaves the old note or the new one, never a partial file, and at worst one extra
 history file. The server never changes the bytes of a save.
 
+(SPEC-DRAWINGS) A drawing is saved the same way, with `drawing.excalidraw` for `note.md`: its
+body is the whole file (`application/vnd.excalidraw+json`, images included), at most 25 MB, and
+step 3 checks only that it is valid UTF-8 and a JSON object with `type` "excalidraw" and an
+array `elements` (422 `not-utf8`, `not-json` or `not-excalidraw`). Before step 2, a body type
+that is not the item's kind is 415, then the kind's limit (2 MB for a note) is 413. Step 7
+keeps a drawing's newest 20 versions.
+
 **Broken front matter:** the first line is `---`, a later line is `---`, and the lines between
 are not blank and do not parse as a YAML mapping. Such text is refused on save and on save as
 new, with the reason. A file in that state on disk is listed with a warning and opens in Raw.
@@ -213,7 +233,11 @@ was saved.
 ### 4.5 The index and files edited by hand
 
 The server keeps, per user and in memory, each live note's id, title, tags, `created`,
-modification time, size and text. Nothing of it is written to disk.
+modification time, size and text. Nothing of it is written to disk. (SPEC-DRAWINGS) For a
+drawing it keeps its kind, the facts of its `nook` key (title, tags, `created`) and the text of
+its text elements (`originalText`, else `text`), never its bytes; search and the excerpt use
+that text. A drawing file that is not JSON or not an Excalidraw scene is listed as broken and
+titled `Untitled`.
 
 **The folder check.** At the start of a list or a search, inside `space.run`, the server lists
 `notes/` and compares each `note.md`'s modification time and size with the index. It re-reads
@@ -243,6 +267,10 @@ can be viewed rendered or raw, and restored. Restoring is an ordinary save by th
 note's current revision, then saves the old text with it, so a restore can itself be undone.
 On a 409 it says the note changed and to try again. A version with broken front matter can be viewed and
 copied but not restored.
+
+(SPEC-DRAWINGS) A drawing's versions are `history/<version>.excalidraw`, the newest 20 kept;
+its history screen is `/d/<id>/history`, which shows a version in Excalidraw in view mode and
+restores it the same way. Every version is a whole file, so every version can be restored.
 
 ### 4.7 Save as a new note
 
@@ -290,16 +318,20 @@ says so when photos are missing.
 | The server fetching for an attacker | Fonts are fetched only from `fonts.google.com`, `fonts.googleapis.com` and `fonts.gstatic.com`, over HTTPS, with no redirects, 5 MB and 20 seconds at most. |
 | A break-in to the process | Unprivileged user, read-only root, no capabilities, `no-new-privileges`, port not published. |
 
-Content security policy, sent with the HTML page with a fresh nonce each time:
+Content security policy (SPEC-DRAWINGS 3.2: one loose policy for every page, which replaces
+the strict one with a nonce; the owner accepts it, since one person uses the app and security
+is not a constraint):
 
 ```
-default-src 'none'; script-src 'self'; style-src-elem 'self' 'nonce-<nonce>';
-style-src-attr 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; connect-src 'self';
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:;
+style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:;
+font-src 'self' data: https:; connect-src 'self' data: blob: https:;
+worker-src 'self' blob:; frame-src https:; media-src 'self' data: blob: https:;
 base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 ```
 
-The server writes the nonce into `<meta name="csp-nonce">` in the page; the script reads it and
-gives it to CodeMirror's `cspNonce`. Svelte's `transition:`, `in:`, `out:` and `animate:`
+The server still writes a fresh nonce into `<meta name="csp-nonce">` in the page; the script
+reads it and gives it to CodeMirror's `cspNonce` (the policy no longer names it). Svelte's `transition:`, `in:`, `out:` and `animate:`
 directives add style elements at run time and are **not used**; motion is done with CSS
 classes. Also sent: `Referrer-Policy: no-referrer`. Logs hold the method, route pattern, status
 and time taken, and never a query string, body, note text or password.
@@ -325,6 +357,9 @@ An error answer is `{ error: { code, message } }`. A 409 on save adds
 | 422 | The text is refused: not UTF-8, or broken front matter; or an upload is not an image |
 | 429 | Too many login attempts, or the server is busy with photos |
 
+(SPEC-DRAWINGS) Every list and trash entry carries `kind` ("note" or "drawing"). The photo and
+asset routes answer 404 for a drawing.
+
 JSON bodies are at most 64 KB (1 KB for login and password). Every `/api` route but login needs
 a session. Answers carry `Cache-Control: no-store`, except photos and font files (`private`).
 
@@ -333,9 +368,9 @@ a session. Answers carry `Cache-Control: no-store`, except photos and font files
 | `POST /api/login`, `POST /api/logout` | Start and end a session |
 | `GET /api/me`, `POST /api/password` | Who am I, and the last backup time; change password |
 | `GET /api/notes?tag=&q=` | List or search: entries (with `excerpt` when searching) and tag counts. `tag` and `q` may be given together and both apply. Tag counts are always of all live notes. |
-| `POST /api/notes` | Create: JSON `{ title? }`. Save as new: a `text/markdown` body with `?from=<id>` |
+| `POST /api/notes` | Create: JSON `{ title?, kind? }` (`kind` "note" or "drawing", "note" by default; SPEC-DRAWINGS). Save as new: a `text/markdown` body, or a drawing's `application/vnd.excalidraw+json`, with `?from=<id>` |
 | `GET /api/notes/:id` | `{ text, revision, entry }` |
-| `PUT /api/notes/:id` | Save: a `text/markdown` body of at most 2 MB, with `If-Match: <revision>` |
+| `PUT /api/notes/:id` | Save: a `text/markdown` body of at most 2 MB, or for a drawing an `application/vnd.excalidraw+json` body of at most 25 MB (SPEC-DRAWINGS), with `If-Match: <revision>`; 415 when the body is not of the item's kind |
 | `DELETE /api/notes/:id` | Move to the trash |
 | `GET /api/notes/:id/history`, `GET /api/notes/:id/history/:version` | Versions; one version's text |
 | `POST /api/notes/:id/photos`, `GET /api/notes/:id/assets/:file` | Upload; fetch |
@@ -745,6 +780,8 @@ today. They are the reference for the mechanisms below.
 | `/` | The welcome: "Pick a note, or start a new one", and any drafts found |
 | `/n/<id>` | The editor |
 | `/n/<id>/history` | Earlier versions: view rendered or raw, restore |
+| `/d/<id>` | (SPEC-DRAWINGS) A drawing, in Excalidraw, with the sidebar |
+| `/d/<id>/history` | (SPEC-DRAWINGS) A drawing's earlier versions: view, restore |
 | `/trash` | Trashed notes: read, restore, empty one or all |
 | `/fonts` | The catalogue by name and category, with "Show more"; add and remove fonts |
 | `/styles` | Saved styles: rename, edit as text, delete |
@@ -762,8 +799,8 @@ Each is one module of Svelte runes that exports its state read-only and its acti
 |---|---|
 | `session` | The user, logging in and out |
 | `library` | The list of notes, tag counts, the search text and tag filter |
-| `editor` | The open note: id, base revision, saved text, line ending and byte order mark, saving, conflict, mode. The view registers a `getText()` with it; `dirty` is that text compared with the saved text. |
-| `drafts` | Unsaved text in local storage |
+| `editor` | The open note: id, base revision, saved text, line ending and byte order mark, saving, conflict, mode. The view registers a `getText()` with it; `dirty` is that text compared with the saved text. (SPEC-DRAWINGS) It has a kind: for a drawing it asks the view for the scene, and `dirty` is the drawing's signature compared with its baseline. |
+| `drafts` | Unsaved text in local storage; each draft has a kind (SPEC-DRAWINGS; one stored without it is a note's) |
 | `styles`, `fonts` | The person's saved styles and fonts, as the server holds them |
 | `prefs` | Kept in the browser only: sidebar folded, last mode |
 | `toasts` | Messages |
@@ -833,6 +870,9 @@ how its state is read from `ToolbarState`. The toolbar, the keymap and the tests
   it offers "Save as a new note" or discard. A draft never expires by age. Logout removes the
   user's drafts after a warning and tells the browser's other tabs, which show the login.
 - Leaving a note with unsaved changes asks first.
+- (SPEC-DRAWINGS) A drawing's draft is its file with `files` empty, and its kind. Opening one
+  takes the images from the file read from the server; Take theirs keeps the person's scene as
+  such a draft; the home screen offers "Save as a new drawing" for a gone drawing's draft.
 
 ### 9.6 Rendering
 
@@ -901,6 +941,14 @@ may change freely.
 Every build sets `window.__notes = { text(), select(from, to), intent(i) }` on the editor
 screen, so a test can read the raw text and drive the core without knowing the layout.
 
+(SPEC-DRAWINGS 7) Also: `new-drawing` in the sidebar; `note-row` and `trash-row` carry
+`data-kind` (`note` or `drawing`); `drawing` is the element Excalidraw is mounted in, with
+`data-ready="true"` once the drawing is ready. The drawing screen's header uses `notes-button`,
+`note-title`, `tag-input`, `tag`, `tag-remove`, `save`, `save-status`, `note-history` and
+`note-trash`; its history screen uses `history-row` and `history-restore`. On the drawing
+screen `window.__drawing = { text(), addText(text, x, y), setBackground(colour),
+addImage(file) }`.
+
 ## 12. Tests the builders write
 
 | Level | What | How |
@@ -915,6 +963,11 @@ screen, so a test can read the raw text and drive the core without knowing the l
 | `e2e` | Seven journeys under the real policy: typing by composition (an IME), right after ordinary typing and over a selection, then undo; log in and create; type and style in Rich, switch to Raw, save, reload; upload and resize a photo; edit a table; conflict in two tabs; trash and restore | Playwright, by test id only |
 
 Every bug found later becomes a `core` scenario before it is fixed.
+
+(SPEC-DRAWINGS 8) The tests of the policy's text check the policy of SPEC-DRAWINGS 3.2, and
+that the page still carries a fresh `csp-nonce` each time. Drawings add their own tests at each
+level (`core/test/drawing.test.ts`, `server/test/drawings.test.ts`,
+`web/test/drawings.test.ts`, `e2e/drawings.test.ts`).
 
 ## 13. Running it
 
