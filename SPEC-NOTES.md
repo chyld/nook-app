@@ -472,12 +472,18 @@ numbers are that document's. Section 6 (the short form for drawings) is not buil
 - **A request is checked against its route's schema before its token.** So a request with a
   malformed id and no token is 400, not 401, as on the browser's routes. With an address that
   fits its route, the order is that of 5.6.
+- **The body-type check comes before the token too** (it is in `onRequest`, the token in
+  `preHandler`): a request with no `Content-Type`, or the wrong one for its route, is 415
+  whether or not it has a token, and is not counted toward the limits of 3.3. It writes
+  nothing. The review of the build pointed this out; the order of 5.6 holds for a request with
+  the body type its route takes.
 - **An address value a route does not have is dropped,** not refused, as Fastify does on every
   route: `?from=…` on create does nothing.
 - **Counting (3.3)** happens when the token is accepted, which in Fastify is after the body
-  has been received. The bytes counted are the body's length. A request refused for the
-  minute's limit counts toward the minute; one refused for the day's limit does not add its
-  bytes. The 429 for bytes carries `size`, `used` and `limit` beside `error`.
+  has been received. The bytes counted are the body's length. A request refused for either
+  limit counts toward the minute, and adds no bytes to the day (the spec says a refused
+  request's bytes count; nothing of it reaches the disk). The wait a 429 names is until this
+  refused request and enough before it have left the minute, so a request sent then is let in. The 429 for bytes carries `size`, `used` and `limit` beside `error`.
 - `empty` and `missing-image` are in `space.save`, which applies them when it is given a
   writer. They are skipped when the file being replaced cannot be read as text or, for a
   drawing, as JSON. The 422 `missing-image` carries `file`; `bad-tag` carries `tag`.
@@ -496,6 +502,10 @@ numbers are that document's. Section 6 (the short form for drawings) is not buil
   has no test: no way was found to bring that state about without also stopping step 5. The
   case where it can be neither read nor written is tested: every text is then a person's and
   saves go on.
+- **A person's save stops too when step 5a fails and its bytes are those a stale `current`
+  names** (the review of the build): a person saving, after a hand edit, the very bytes an
+  agent once wrote, while the old record cannot be cleared. Going on would have left the
+  person's save counted as the agent's. Like the case above, it has no test.
 - When step 5a fails for an agent's save, the version file that step 5 made stays: one extra
   copy of the current text, as SPEC2 4.4 already allows after a crash.
 
@@ -513,6 +523,23 @@ numbers are that document's. Section 6 (the short form for drawings) is not buil
 - A hint is added by the error handler for every answer of 400 or above on an agent address.
   A schema failure's hint is Fastify's own message, which names the part at fault
   (`params/id must match pattern …`), and the guide's address.
+
+## After the review of the build (2026-11-13)
+
+Seven AI models reviewed the build (two more did not finish). None found a way for a token to
+delete, to reach another person, or to remove a person's version. What changed:
+
+- A person's save stops when step 5a fails and its bytes are those a stale `current` names
+  (above).
+- A kept space (U+00A0) is content in the checks for an empty note and an empty append.
+- The wait a 429 names was one request short; the day's hint says when the request would fit.
+- The Account screen's list of agents, and a token still shown or on its way, go when the
+  session ends; while a token is shown another cannot be made.
+- A burst of requests writes a token's last use once. A body past a route's own limit says
+  its size and the limit in the hint.
+- The guide no longer says that every save's text is kept (agents' versions are the newest 10
+  or 5), that append changes nothing of the note (it tidies the end), or that the app measures
+  a drawing's text; and its `empty` row tells an append to send only the new text.
 
 ## Section 9: the tests
 

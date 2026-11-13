@@ -109,6 +109,9 @@ test("append: the note's line endings are used for the added text", () => {
 test("append: nothing to add", () => {
   assert.equal(appendToNote("one\n", ""), null);
   assert.equal(appendToNote("one\n", " \n\t\r\n"), null);
+  assert.equal(appendToNote("one\n", "﻿\n"), null, "only a byte order mark and a line ending");
+  // A kept space (U+00A0) is content, here as everywhere in the app.
+  assert.equal(appendToNote("one\n", " "), "one\n\n \n");
 });
 
 test("3.3: a note is blank when nothing but white space follows its head", () => {
@@ -117,6 +120,7 @@ test("3.3: a note is blank when nothing but white space follows its head", () =>
   assert.equal(noteIsBlank(""), true);
   assert.equal(noteIsBlank('---\ntitle: "T"\n---\n\nx\n'), false);
   assert.equal(noteIsBlank("x"), false);
+  assert.equal(noteIsBlank('---\ntitle: "T"\n---\n\n \n'), false, "a kept space (U+00A0) is content");
 });
 
 test("3.3: live elements are the objects not marked deleted", () => {

@@ -237,7 +237,15 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
     const status = e.statusCode;
     if (status && status >= 400 && status < 500) {
       const message = status === 413 ? "The request is too large." : status === 415 ? "Unsupported content type." : "Bad request.";
-      return refuse(req, reply, status, errorBody(status, message));
+      // The route's own limit on a body (SPEC-AGENTS 5.8): the size, when it was said, and the
+      // limit.
+      let hint: string | undefined;
+      const limit = req.routeOptions.bodyLimit;
+      if (status === 413 && typeof limit === "number") {
+        const sent = Number(req.headers["content-length"]);
+        hint = `${Number.isFinite(sent) && sent > 0 ? `The body is ${sent} bytes` : "The body is too large"}; this route takes at most ${limit}. A note may be at most ${LIMITS.noteBytes} bytes and a drawing ${LIMITS.drawingBytes}.`;
+      }
+      return refuse(req, reply, status, errorBody(status, message), hint);
     }
     ctx.log.error(`${req.method} ${req.routeOptions.url ?? ""} failed: ${(err as NodeJS.ErrnoException).code ?? (err as Error).name}`);
     return refuse(req, reply, 500, errorBody(500, "Something went wrong on the server."));

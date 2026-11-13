@@ -62,9 +62,13 @@ export function splitNote(note: string): { head: string; text: string } {
   return { head: note.slice(0, end), text: note.slice(end) };
 }
 
-/** True when a note has nothing but white space after its head (3.3). */
+/** Only spaces, tabs and line endings. A kept space (U+00A0) is content, as everywhere in the
+ *  app (SPEC-NOTES, "The kept space"), so `trim()` is not used. */
+const isOnlySpace = (s: string): boolean => /^[ \t\r\n]*$/.test(s);
+
+/** True when a note has nothing but spaces, tabs and line endings after its head (3.3). */
 export function noteIsBlank(note: string): boolean {
-  return splitNote(note).text.trim() === "";
+  return isOnlySpace(splitNote(note).text);
 }
 
 /**
@@ -75,9 +79,10 @@ export function noteIsBlank(note: string): boolean {
  * not changed. Between a text that is not empty and the body there is exactly one empty line.
  */
 export function appendToNote(note: string, body: string): string | null {
-  if (body.trim() === "") return null;
+  const sent = body.charCodeAt(0) === 0xfeff ? body.slice(1) : body;
+  if (isOnlySpace(sent)) return null;
   const eol = firstLineEnding(note);
-  const added = (body.charCodeAt(0) === 0xfeff ? body.slice(1) : body)
+  const added = sent
     .replace(/\r\n?/g, "\n")
     .replace(/^\n+/, "")
     .replace(/\n+$/, "")

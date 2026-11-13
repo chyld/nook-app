@@ -123,8 +123,9 @@
     {/if}
     <form class="row" onsubmit={makeAgent}>
       <Field label="Name of a new agent" hint="For example: Claude on the laptop." maxlength={LIMITS.agentName} bind:value={agentName} data-testid="agent-name" required />
-      <Button type="submit" data-testid="agent-make" disabled={agents.busy || agentName.trim() === ""}>Make a token</Button>
+      <Button type="submit" data-testid="agent-make" disabled={agents.busy || agents.made !== null || agentName.trim() === ""}>Make a token</Button>
     </form>
+    {#if agents.made}<p class="note">Close the token above before you make another.</p>{/if}
     {#if agents.error}<p class="error" role="alert" data-testid="agent-error">{agents.error}</p>{/if}
   </section>
   <div><Button data-testid="logout" onclick={logout}>Log out</Button></div>

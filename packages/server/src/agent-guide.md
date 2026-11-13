@@ -42,9 +42,9 @@ created: 2026-11-12
 A **tag** is 1 to 30 lower-case letters `a` to `z`. `food` is a tag; `meeting-notes`, `2026` and
 `Food` are not.
 
-Every answer about one item has `entry` (its `id`, `kind`, `title`, `tags`, `created`,
-`modified`, `size`, and `agent`: the name of the agent that last wrote it, or `null` for a
-person), and `url`: the page to give your person.
+The answer to a create, a read, a save and an append has `entry` (the item's `id`, `kind`,
+`title`, `tags`, `created`, `modified`, `size`, and `agent`: the name of the agent that last
+wrote it, or `null` for a person), and `url`: the page to give your person.
 
 ## List and search
 
@@ -108,13 +108,16 @@ save.
 
 ## Add to the end of a note
 
-For a log, a list or a journal, append. It needs no revision and cannot overwrite anything:
+For a log, a list or a journal, append. It needs no revision and replaces none of the note's
+text. (It does tidy the very end: spaces, tabs and empty lines after the last line of the note
+are removed before the new text is added. If those matter, save the whole document.)
 
 ```sh
 curl -sS -X POST "{{SERVER}}/api/agent/v1/items/$ID/append" -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" --data-binary '- olive oil'
 ```
 
-Answer: as a save. The text goes after one empty line at the end of the note.
+Answer: as a save. The text goes after the note's existing text, with one empty line between
+them (straight after the front matter when the note has no text yet).
 
 If the answer to an append is lost, **read the note before you send it again**, or the text is
 added twice. Or send `If-Match` with the revision you read: then a second try is refused with
@@ -122,7 +125,11 @@ added twice. Or send `If-Match` with the revision you read: then a second try is
 
 ## Undo: history
 
-Every save keeps the text it replaced. To undo a save, read the old version and save its text.
+A save that changes the document keeps the text it replaced, as a version (a save of the same
+bytes writes nothing). To undo a save, read the old version and save
+its text. Do it soon: of the texts that agents wrote, only the newest 10 of a note and 5 of a
+drawing are kept, so your eleventh save of a note removes the oldest of them. The texts a
+person wrote are not removed by anything you do.
 
 ```sh
 curl -sS "{{SERVER}}/api/agent/v1/items/$ID/history" -H "Authorization: Bearer $NOOK_TOKEN"
@@ -177,7 +184,8 @@ The rules that keep a drawing whole:
 - Give each element a different `seed`, `versionNonce` and `index` (`a0`, `a1`, `a2`, … in the
   order they are drawn).
 - A text's `width` is about 11 pixels a character at `fontSize` 20, and its `height` 25 a line.
-  The app measures it properly when a person opens and saves the drawing.
+  Nothing measures it for you: the sizes stay as you write them until a person edits that
+  text, so leave a label room inside its box.
 
 To change a drawing, read it, change the JSON, and save **all of it** with `PUT`, as for a
 note, with `Content-Type: application/vnd.excalidraw+json`. Keep `files` whole: it holds the
@@ -205,7 +213,7 @@ Every error is JSON, and `hint` says what to do next:
 | 422 | `not-utf8`, `not-json`, `not-excalidraw`, `refused` | The document cannot be read | Send valid UTF-8; for a drawing, valid JSON with `type` and `elements` |
 | 422 | `broken-front-matter` | The front matter is not valid YAML | Mend what you sent; if the note already had it, tell your person |
 | 422 | `bad-tag`, `bad-title` | A tag or the title in the address is not acceptable | A tag is lower-case letters only; a title is at most 300 characters |
-| 422 | `empty` | The save would empty the item, or an append had no text | Send the whole document |
+| 422 | `empty` | A save would empty the item; or an append had no text | For a save, send the whole document you want. For an append, send only the text to add, never the whole note |
 | 422 | `missing-image` | The save would drop an image of a drawing | Read again and send `files` whole |
 | 428 | `no-revision` | A save without `If-Match` | Read the item and send its revision |
 | 429 | `busy` | More than 60 changes a minute or 300 MB a day for this person | Wait as the hint says |

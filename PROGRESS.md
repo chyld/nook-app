@@ -152,5 +152,9 @@ owner's decision.
 - [x] 6. `e2e/agents.test.ts` (2), README.md, SPEC-NOTES.md, this file, and the changes to
       SPEC2.md (marked "(SPEC-AGENTS)").
 - [x] Full run (2026-11-13): typecheck and lint clean; core 114/114, server 110/110, web
-      88/88, e2e 80/80. No Docker command was run: the running stack has not been rebuilt
-      with agents.
+      88/88, e2e 80/80.
+- [x] Review of the build (2026-11-13) by seven AI models; two more did not finish. Outcomes in
+      SPEC-NOTES.md, "After the review of the build". Each fix has a test where one could be
+      written: core (2 more assertions), server (3 new), web (3 new). Full run: typecheck and
+      lint clean; core 114/114, server 113/113, web 91/91, e2e 80/80. The Docker stack was
+      rebuilt from this branch for the owner to try.

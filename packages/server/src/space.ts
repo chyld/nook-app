@@ -536,8 +536,11 @@ export class UserSpace {
       try {
         await this.#writeWriters(id, { current: null, versions });
       } catch (e) {
-        // A person's save goes on: its file cannot match a stale `current`. An agent's stops.
-        if (writer !== null) throw e;
+        // An agent's save stops. A person's goes on, because its file cannot match a stale
+        // `current`; unless it does: a person saving the very bytes an agent once wrote, after
+        // a hand edit, while the old record of them cannot be cleared. Going on would leave
+        // the person's save counted as the agent's, so that save stops too (review).
+        if (writer !== null || writers?.current?.revision === revisionOf(bytes)) throw e;
         this.log.error(`writers.json could not be written: ${errCode(e) ?? (e as Error).name}`);
       }
     }

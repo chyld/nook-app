@@ -221,6 +221,29 @@ test("tokens: the last use is written at most once an hour", async () => {
   t += 60 * 1000;
   await a.get(`${A}/items`);
   assert.equal(await used(), "2026-11-12T11:00:00.000Z");
+  // A burst an hour later writes the file once, not once a request (review).
+  t += 3600 * 1000;
+  const file = path.join(s.root, "config", "agents.json");
+  let writes = 0;
+  const watcher = (await import("node:fs")).watch(path.dirname(file), (_e, name) => {
+    if (name === "agents.json") writes++;
+  });
+  await Promise.all(Array.from({ length: 8 }, () => a.get(`${A}/items`)));
+  await new Promise((r) => setTimeout(r, 100));
+  watcher.close();
+  assert.equal(await used(), "2026-11-12T12:00:00.000Z");
+  assert.ok(writes >= 1 && writes <= 4, `${writes} changes of agents.json seen for eight requests at once`);
+});
+
+test("3.3 (review): a note that holds only a kept space is not empty, so an agent may not empty it", async () => {
+  const { a, c } = await setup();
+  const p = await c.create("P");
+  const kept = p.text + " \n";
+  const saved = await c.save(p.id, kept, p.revision);
+  assert.equal(saved.statusCode, 200);
+  refused(await a.save(p.id, p.text, saved.json().revision), 422, "empty");
+  // And a kept space can be appended: it is content.
+  assert.equal((await a.append(p.id, " ")).statusCode, 200);
 });
 
 test("tokens: what is not a token is refused without a lookup, and agents.json that cannot be read is an empty table", async () => {
@@ -622,6 +645,10 @@ test("append: what is refused", async () => {
   const big = (await a.create("x".repeat(LIMITS.noteBytes - 300), "?title=Big")).json();
   refused(await a.append(big.id, "y".repeat(400)), 413, "too-large");
   assert.equal((await a.append(big.id, "y".repeat(100))).statusCode, 200);
+  // Past the route's own limit (review): the size sent and the limit are in the hint.
+  const routeLimit = LIMITS.noteBytes + 64 * 1024;
+  const past = await a.append(big.id, "y".repeat(routeLimit + 1));
+  refused(past, 413, "too-large", new RegExp(`${routeLimit + 1} bytes.*at most ${routeLimit}`));
   // A note whose front matter is already broken (a hand edit): a person must mend it.
   const p = await c.create("P");
   await fs.writeFile(path.join(dir, "notes", p.id, "note.md"), "---\ntitle: [unclosed\n---\n\ntext\n");
@@ -655,6 +682,47 @@ test("3.3: at most 60 changing requests a minute for a person, across tokens; a 
   // A minute after the first of them.
   t += 60_001;
   assert.equal((await a.append(n.id, "y")).statusCode, 200);
+});
+
+test("3.3 (review): an agent that waits as the 429 says is let in, and one that retries sooner is not", async () => {
+  const { s, a } = await setup();
+  let t = Date.parse("2026-11-12T10:00:00.000Z");
+  s.ctx.agents.now = () => t;
+  const n = (await a.create("x\n", "?title=T")).json();
+  // One change a second: 60 of them with the create, the last at 59 seconds.
+  for (let i = 1; i < 60; i++) {
+    t += 1000;
+    assert.equal((await a.append(n.id, `line ${i}`)).statusCode, 200, String(i));
+  }
+  t += 500;
+  const over = await a.append(n.id, "too many");
+  refused(over, 429, "busy");
+  const wait = Number(/Wait (\d+) seconds/.exec(err(over).hint!)![1]);
+  // The refused request counts, so the wait is until two have left the minute, not one.
+  assert.equal(wait, 2);
+  const before = t;
+  t = before + (wait - 1) * 1000;
+  // (Asking a second early is itself counted, and so pushes the moment on.)
+  const early = await a.append(n.id, "too soon");
+  refused(early, 429, "busy");
+  t += Number(/Wait (\d+) seconds/.exec(err(early).hint!)![1]) * 1000;
+  assert.equal((await a.append(n.id, "in time")).statusCode, 200, "let in at the moment the hint named");
+});
+
+test("3.3 (review): the bytes of a real request are counted, and past the day's total it is refused", async () => {
+  const { s, a } = await setup();
+  const user = s.ctx.accounts.byName("alice")!.id;
+  // All but 100 bytes of the day are used.
+  s.ctx.agents.count(user, LIMITS.agentBytesPerDay - 100);
+  assert.equal((await a.create("x".repeat(60), "?title=Fits")).statusCode, 201);
+  const over = await a.create("y".repeat(41), "?title=Over");
+  refused(over, 429, "busy", /41 bytes .*try again in about 24 hours/);
+  assert.deepEqual([over.json().size, over.json().limit], [41, LIMITS.agentBytesPerDay]);
+  assert.equal((await a.create("z".repeat(40), "?title=Just")).statusCode, 201, "exactly what is left");
+  assert.equal((await a.get(`${A}/items`)).json().entries.length, 2);
+  // A request larger than the whole allowance is told so.
+  const agents = new Agents({} as never, {} as never, { info: () => {}, error: () => {} }, () => undefined);
+  assert.throws(() => agents.count("u", LIMITS.agentBytesPerDay + 1), (e: { hint: string }) => /larger than a whole day/.test(e.hint));
 });
 
 test("3.3: at most 300 MB of bodies in 24 hours for a person", () => {

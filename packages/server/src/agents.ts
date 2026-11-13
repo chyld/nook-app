@@ -155,6 +155,9 @@ export class Agents {
         // Under the lock: the token may have been revoked, or its user removed, meanwhile.
         const r = this.#byHash.get(hash);
         if (!r || !this.userById(r.userId)) return null;
+        // Or another request, waiting for the lock beside this one, has just written it: a
+        // burst of requests writes the file once, not once each (review).
+        if (r.used !== null && t - Date.parse(r.used) < AGENT_TOUCH_MS) return r;
         const touched = { ...r, used: new Date(t).toISOString() };
         try {
           await this.#save(this.records.map((x) => (x.id === r.id ? touched : x)));
@@ -184,19 +187,31 @@ export class Agents {
     // A person's table never holds more than the limit and what one minute can add to it.
     this.#changes.set(userId, changes.slice(-LIMITS.agentChanges * 4));
     if (overCount) {
-      const wait = Math.max(1, Math.ceil((changes[changes.length - LIMITS.agentChanges - 1] + MINUTE_MS - t) / 1000));
+      // This request has been counted too, so the next one is let in once all but 59 of the
+      // requests counted have left the minute: when the 60th newest of them does (review).
+      const wait = Math.max(1, Math.ceil((changes[changes.length - LIMITS.agentChanges] + MINUTE_MS - t + 1) / 1000));
       this.#bytes.set(userId, sent);
       throw new HttpError(429, `Agents may make at most ${LIMITS.agentChanges} changes a minute for one person.`, {}, "busy", `Wait ${wait} seconds, then send the request again. Reading is not limited.`);
     }
     if (overBytes) {
       this.#bytes.set(userId, sent);
-      const hours = sent.length ? Math.max(1, Math.ceil((sent[0].at + DAY_MS - t) / 3_600_000)) : 24;
+      // When this request would fit: once enough of the oldest bytes have left the 24 hours.
+      let freed = 0;
+      let at: number | null = null;
+      for (const x of sent) {
+        freed += x.bytes;
+        if (used - freed + bytes <= LIMITS.agentBytesPerDay) {
+          at = x.at;
+          break;
+        }
+      }
+      const when = at === null ? "It is larger than a whole day's allowance: send something smaller." : `Send something smaller, or try again in about ${Math.max(1, Math.ceil((at + DAY_MS - t) / 3_600_000))} hours.`;
       throw new HttpError(
         429,
         `Agents may send at most ${Math.round(LIMITS.agentBytesPerDay / MB)} MB in 24 hours for one person.`,
         { size: bytes, used, limit: LIMITS.agentBytesPerDay },
         "busy",
-        `This request has ${bytes} bytes and ${used} of ${LIMITS.agentBytesPerDay} are used. Send something smaller, or try again in about ${hours} hours.`,
+        `This request has ${bytes} bytes and ${used} of ${LIMITS.agentBytesPerDay} are used. ${when}`,
       );
     }
     sent.push({ at: t, bytes });
