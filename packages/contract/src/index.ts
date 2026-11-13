@@ -12,6 +12,10 @@ export const MB = 1024 * 1024;
 export const LIMITS = {
   /** A note's bytes (SPEC2 4.4). */
   noteBytes: 2 * MB,
+  /** A drawing's bytes, its images included (SPEC-DRAWINGS 4.4; Caddy allows 27 MB). */
+  drawingBytes: 25 * MB,
+  /** The versions a drawing keeps (SPEC-DRAWINGS 4.4): each repeats its images. */
+  drawingHistory: 20,
   /** JSON bodies; login and password bodies (section 6). */
   jsonBody: 64 * KB,
   loginBody: 1 * KB,
@@ -89,6 +93,26 @@ export function makeVersion(date: Date, random = randomBase32(4)): string {
 /** The app's own clipboard type (7.6). */
 export const CLIPBOARD_TYPE = "text/x-notes-markdown";
 
+// --- kinds (SPEC-DRAWINGS) --------------------------------------------------------------------
+
+/** What an item is: a note (`note.md`) or a drawing (`drawing.excalidraw`). */
+export type Kind = "note" | "drawing";
+export const KINDS: readonly Kind[] = ["note", "drawing"];
+
+/** A drawing's body type (SPEC-DRAWINGS 5). */
+export const DRAWING_TYPE = "application/vnd.excalidraw+json";
+/** The body type of each kind's document. */
+export const DOCUMENT_TYPE: Record<Kind, string> = { note: "text/markdown", drawing: DRAWING_TYPE };
+/** The kind a document body type names, or null. */
+export const kindOfType = (type: string): Kind | null => (type === "text/markdown" ? "note" : type === DRAWING_TYPE ? "drawing" : null);
+/** Each kind's largest document and its history (SPEC2 4.4, 4.6; SPEC-DRAWINGS 4.4). */
+export const KIND_LIMITS: Record<Kind, { bytes: number; history: number }> = {
+  note: { bytes: LIMITS.noteBytes, history: LIMITS.history },
+  drawing: { bytes: LIMITS.drawingBytes, history: LIMITS.drawingHistory },
+};
+/** The largest document of either kind: the limit of the routes that take one. */
+const DOCUMENT_LIMIT = Math.max(LIMITS.noteBytes, LIMITS.drawingBytes);
+
 // --- shapes -----------------------------------------------------------------------------------
 
 const NoteId = Type.String({ pattern: PATTERNS.noteId });
@@ -99,6 +123,7 @@ const PhotoFile = Type.String({ pattern: PATTERNS.photoFile });
 const StyleName = Type.String({ pattern: PATTERNS.styleName });
 const Revision = Type.String({ pattern: PATTERNS.revision });
 const Nullable = <T extends TSchema>(t: T) => Type.Union([t, Type.Null()]);
+const KindSchema = Type.Union([Type.Literal("note"), Type.Literal("drawing")]);
 
 export const ErrorBody = Type.Object({
   error: Type.Object({ code: Type.String(), message: Type.String() }),
@@ -107,6 +132,7 @@ export const ErrorBody = Type.Object({
 /** One note of the list (4.5). */
 export const Entry = Type.Object({
   id: NoteId,
+  kind: KindSchema,
   title: Type.String(),
   tags: Type.Array(Type.String()),
   created: Nullable(Type.String()),
@@ -133,6 +159,7 @@ export const HistoryEntry = Type.Object({ version: Version, time: Type.String(),
 
 export const TrashEntry = Type.Object({
   id: NoteId,
+  kind: KindSchema,
   title: Type.String(),
   tags: Type.Array(Type.String()),
   trashed: Nullable(Type.String()),
@@ -169,8 +196,9 @@ export type ConflictBody = Static<typeof ConflictBody>;
 
 // --- routes -----------------------------------------------------------------------------------
 
-/** How a route's body is sent: JSON, raw Markdown text, a multipart upload, or none. */
-export type BodyKind = "none" | "json" | "markdown" | "multipart" | "json-or-markdown";
+/** How a route's body is sent: JSON, raw Markdown text, a multipart upload, or none.
+ *  "document": a note's Markdown or a drawing's file (SPEC-DRAWINGS 5). */
+export type BodyKind = "none" | "json" | "markdown" | "multipart" | "json-or-markdown" | "document" | "json-or-document";
 /** What a route answers: JSON, or a file (bytes or CSS). */
 export type ReplyKind = "json" | "file";
 
@@ -216,14 +244,14 @@ export const routes = {
     answer: Type.Object({ entries: Type.Array(Entry), tags: Type.Array(TagCount) }),
   }),
   create: r({
-    method: "POST", url: "/api/notes", auth: true, body: "json-or-markdown", bodyLimit: LIMITS.noteBytes, reply: "json",
+    method: "POST", url: "/api/notes", auth: true, body: "json-or-document", bodyLimit: DOCUMENT_LIMIT, reply: "json",
     query: Type.Object({ from: Type.Optional(NoteId) }, { additionalProperties: false }),
-    json: Type.Object({ title: Type.Optional(Type.String({ maxLength: 2000 })) }, { additionalProperties: false }),
+    json: Type.Object({ title: Type.Optional(Type.String({ maxLength: 2000 })), kind: Type.Optional(KindSchema) }, { additionalProperties: false }),
     answer: Type.Object({ id: NoteId, revision: Revision, entry: Entry, text: Type.String(), photosMissing: Type.Boolean() }),
   }),
   read: r({ method: "GET", url: "/api/notes/:id", auth: true, body: "none", reply: "json", params: Type.Object({ id: NoteId }), answer: NoteDoc }),
   save: r({
-    method: "PUT", url: "/api/notes/:id", auth: true, body: "markdown", bodyLimit: LIMITS.noteBytes, reply: "json",
+    method: "PUT", url: "/api/notes/:id", auth: true, body: "document", bodyLimit: DOCUMENT_LIMIT, reply: "json",
     params: Type.Object({ id: NoteId }),
     headers: Type.Object({ "if-match": Revision }),
     answer: Type.Object({ revision: Revision, entry: Entry }),
@@ -297,4 +325,4 @@ export function urlOf(url: string, params: Record<string, string> = {}): string 
 }
 
 /** The browser's addresses (9.1): every one is answered with the HTML page. */
-export const PAGES = ["/", "/login", "/n/:id", "/n/:id/history", "/trash", "/fonts", "/styles", "/account"] as const;
+export const PAGES = ["/", "/login", "/n/:id", "/n/:id/history", "/d/:id", "/d/:id/history", "/trash", "/fonts", "/styles", "/account"] as const;

@@ -157,7 +157,7 @@ export class UserSpace {
   }
 
   entryOf(e: Indexed): Entry {
-    const out: Entry = { id: e.id, title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size };
+    const out: Entry = { id: e.id, kind: "note", title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size };
     if (e.text === null) out.problem = "unreadable";
     else if (e.broken) out.problem = "broken";
     return out;
@@ -408,7 +408,7 @@ export class UserSpace {
       }
     }
     const f = facts(text);
-    return { entry: { id, title: f.title, tags: f.tags, trashed: when, size: bytes.length }, text };
+    return { entry: { id, kind: "note", title: f.title, tags: f.tags, trashed: when, size: bytes.length }, text };
   }
 
   async listTrash(): Promise<TrashEntry[]> {

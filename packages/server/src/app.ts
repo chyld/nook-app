@@ -123,6 +123,7 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
       want === "json" ? type === "application/json" :
       want === "markdown" ? type === "text/markdown" :
       want === "multipart" ? type === "multipart/form-data" :
+      want === "document" ? type === "text/markdown" :
       type === "application/json" || type === "text/markdown";
     if (!fits) throw new HttpError(415, "This request has the wrong kind of body.");
   });

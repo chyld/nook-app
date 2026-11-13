@@ -333,3 +333,15 @@ Chromium through Playwright (with internet access). Found:
   code" go; the tools menu keeps its heading "Generate" over "Mermaid to Excalidraw", which is
   not an AI feature. **Excalidraw+**: with Nook's own `MainMenu` there is no link to it but the
   help dialog's "Blog" button (`plus.excalidraw.com/blog`), hidden by CSS.
+
+## Section 5 and 8: the contract
+
+- `BodyKind` keeps `"markdown"` and `"json-or-markdown"` beside the new `"document"` and
+  `"json-or-document"` (no route uses the old two now). `contract` also has `Kind`,
+  `DRAWING_TYPE`, `DOCUMENT_TYPE` (each kind's body type), `kindOfType` and `KIND_LIMITS` (each
+  kind's bytes and history), so the server and the browser take a kind's numbers from one place.
+- Section 8 says no other existing test changes. One more had to: the test that every route
+  needing a session answers 401 (`server/test/refusals.test.ts`) builds each request from the
+  route's body kind and sent a Markdown body only to a `"markdown"` route; it now does the same
+  for a `"document"` route, the new name section 5 gives the body of a save. Without that it
+  sends JSON to the save route, which is refused with 415 before the session is looked at.

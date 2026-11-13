@@ -16,7 +16,7 @@ export class FakeApi {
   next = 1;
 
   entry(id: string): Entry {
-    return { id, title: "T", tags: [], created: null, modified: Date.now(), size: this.notes.get(id)?.text.length ?? 0 };
+    return { id, kind: "note", title: "T", tags: [], created: null, modified: Date.now(), size: this.notes.get(id)?.text.length ?? 0 };
   }
 
   add(text: string): string {

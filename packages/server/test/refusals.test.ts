@@ -135,7 +135,9 @@ test("every route that needs a session answers 401 without one", async () => {
   let checked = 0;
   for (const [name, def] of Object.entries(routes) as [string, RouteDef][]) {
     if (!def.auth) continue;
-    const headers: Record<string, string> = def.body === "markdown" ? { "content-type": "text/markdown", "if-match": "a".repeat(64) } : def.body === "multipart" ? { "content-type": "multipart/form-data; boundary=x" } : {};
+    // "document" is SPEC-DRAWINGS 5's name for the body of a save (a note's Markdown here).
+    const doc = def.body === "markdown" || def.body === "document";
+    const headers: Record<string, string> = doc ? { "content-type": "text/markdown", "if-match": "a".repeat(64) } : def.body === "multipart" ? { "content-type": "multipart/form-data; boundary=x" } : {};
     // Valid bodies: a body that does not match its schema is refused with 400 first.
     const json: Record<string, unknown> = {
       password: { current: "x", next: "y".repeat(LIMITS.passwordMin) },
@@ -143,7 +145,7 @@ test("every route that needs a session answers 401 without one", async () => {
       styleSave: { style: { name: "S", bold: true, italic: false, underline: false, strike: false, size: null, font: null, color: null, bg: null } },
       fontAdd: { slug: "caveat" },
     };
-    const body = def.method === "GET" || def.method === "DELETE" ? undefined : def.body === "markdown" ? "text" : def.body === "multipart" ? "--x--\r\n" : (json[name] ?? {});
+    const body = def.method === "GET" || def.method === "DELETE" ? undefined : doc ? "text" : def.body === "multipart" ? "--x--\r\n" : (json[name] ?? {});
     const r = await c.req(def.method, fill(def.url), body, headers);
     assert.equal(r.statusCode, 401, `${name} ${def.method} ${def.url}: ${r.statusCode} ${r.body}`);
     checked++;
