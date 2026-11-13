@@ -1,6 +1,6 @@
 # Nook agents: specification
 
-Draft 3, 2026-11-12. Not built. Section 14 says what changed since draft 1.
+Draft 4, 2026-11-12. Not built. Section 14 says what changed since draft 1.
 
 This document adds an interface for AI agents to the app that `SPEC2.md` and
 `SPEC-DRAWINGS.md` describe. Where it is silent, those documents apply. "SPEC2 4.4" means that
@@ -63,15 +63,19 @@ open web app that an agent changed something (the person sees it on the next lis
   record is `{ id, userId, name, hash, created, used }`: `id` is 16 base-32 characters;
   `created` is an ISO date-time; `used` is the ISO date-time of the last request or `null`,
   written at most once an hour.
-- **The name** is trimmed first, then must be 1 to 40 characters with no control characters
-  (`PATTERNS.styleName`), and unique among one person's tokens, compared without case.
+- **The name** is trimmed first, then must be 1 to 40 characters, none of them U+0000 to
+  U+001F or U+007F to U+009F (`PATTERNS.agentName`, a pattern of its own), and unique among
+  one person's tokens, compared without case.
 - A person may have at most 20 tokens (`LIMITS.agents`).
 - **A token is good only while its user exists.** Looking a token up also looks the user up
   (`byId`), as a session does.
-- **Removing a user** removes that user's tokens first and writes `agents.json`, then removes
-  the user as now. A crash between the two leaves a user without tokens.
-- **Changing a password and `reset-password`** remove all that user's tokens, in the same
-  locked step that ends the sessions. The Account screen says so before the change.
+- **Removing a user, changing a password and `reset-password`** remove all that user's
+  tokens. One function, `Agents.removeForUserLocked(userId)`, does it; it assumes the
+  accounts lock is held (the lock cannot be taken twice) and is called inside
+  `removeUserLocked`, `changePassword` and `resetPassword`, in each before `users.json` is
+  written, where the sessions are deleted. So `agents.json` is written before `users.json`,
+  and a crash between the two leaves the old password without tokens, never a new password
+  with old tokens. The Account screen says before a password change that it revokes them.
 - `config/` is already in the backup, so the hashes are.
 
 ### 2.2 Making and revoking, in the web app
@@ -95,10 +99,11 @@ line saying it will not be shown again; it stays until the person closes it.
 
 ### 3.1 Three ways to be let in
 
-`RouteDef.auth` changes from a boolean to `"session" | "token" | "none"`, and `app.ts` passes
-it to each route's config.
+`RouteDef.auth` and `FastifyContextConfig.auth` change from a boolean to
+`"session" | "token" | "none"`, and `app.ts` passes it to each route's config.
 
-- `"none"`: login and the guide (5.1). No check.
+- `"none"`: every route that has `auth: false` today (login, and the pages, `/assets/*` and
+  `/favicon.svg` that `app.ts` registers outside `routes`), and the guide (5.1). No check.
 - `"session"`: every route that has `auth: true` today. The `preHandler` looks only at the
   cookie. A request with a token and no cookie is 401, as now.
 - `"token"`: every route of section 5 but the guide. The `preHandler` reads
@@ -108,15 +113,20 @@ it to each route's config.
 
 ### 3.2 The `/api/agent/` addresses
 
-- **The `Origin` check does not apply** to a request whose path begins `/api/agent/`, whether
-  or not a route matches (a program sends no `Origin`, and no browser sends the token by
-  itself). It applies to every other request as now.
+"Under `/api/agent/`" means that the request's path, without its query, begins with the
+eleven characters `/api/agent/`. `/api/agents` (2.2) is not under it and keeps every check.
+
+- **The `Origin` check does not apply** to a request under `/api/agent/`, whether or not a
+  route matches (a program sends no `Origin`, and no browser sends the token by itself). It
+  applies to every other request as now.
 - **An address or method under `/api/agent/` that is no route** is 404 `not-found` with a hint
-  naming the guide, from the not-found handler, never 403 or 405.
+  naming the guide, whatever its headers and body: `onRequest` returns at once for such a
+  request (no `Origin` check, no body-type check), and the not-found handler answers.
+  Fastify answers an unmatched method there too, with 404 and not 405.
 - **No route in the set deletes.** The set is exactly section 5. None has the method
   `DELETE`.
-- The body-type check of `onRequest`, the 64 KB limit on JSON, the response headers and the
-  log line apply as to other routes. The log never holds a token.
+- For a route that matches, the body-type check of `onRequest`, the 64 KB limit on JSON, the
+  response headers and the log line apply as to other routes. The log never holds a token.
 
 ### 3.3 Limits on what agents write
 
@@ -125,22 +135,28 @@ Counted per person, across all that person's tokens, in memory (a restart clears
 - at most 60 changing requests in any minute (`LIMITS.agentChanges`);
 - at most 300 MB of request bodies in any 24 hours (`LIMITS.agentBytesPerDay`).
 
-Beyond either, 429 `busy` with a hint saying when to try again. Reading is not limited.
+Beyond either, 429 `busy` with a hint saying when to try again. Reading is not limited. A
+request is counted when its token has been accepted, before anything else is checked, so a
+refused request counts; its bytes are the length of the body sent.
 
-**A save that empties.** An agent's save or create is 422 `empty` when the note's text after
-its front matter is only white space, or when a drawing that has elements would be left with
-none. (An empty note can still be made by create with no body, 5.5.)
+Two refusals apply to an agent's save and append, and never to a person's save or to a
+create. Both compare the new document with the one it replaces:
 
-**A save that drops images.** An agent's save of a drawing is 422 `missing-image`, naming the
-file id, when an image element that is not deleted names a file that `files` does not hold.
+- **A save that empties** is 422 `empty`: a note whose text after its front matter was not
+  only white space and would be; or a drawing that had an element not marked deleted
+  (`isDeleted` not `true`) and would have none.
+- **A save that drops an image** is 422 `missing-image`, naming the file id: an image element
+  that is not marked deleted names a file that the new `files` does not hold and the current
+  file's `files` does.
 
 ### 3.4 Tests that hold the boundary
 
 For every route with `auth: "session"`: a request that is otherwise valid (a good `Origin`, a
 valid body) with a good token and no cookie is 401, and nothing on disk changes. For every
 route with `auth: "token"`: a good cookie without a token is 401. No route under
-`/api/agent/` has the method `DELETE`; `DELETE` on each agent address, with no `Origin` and
-with a foreign one, is 404. A token reaches only its own person's items.
+`/api/agent/` has the method `DELETE`; `DELETE` on each agent address, with no `Origin`, with
+a foreign one, and with a body of an unknown type, is 404. `POST /api/agents` without an
+`Origin` is still 403. A token reaches only its own person's items.
 
 ## 4. Who wrote what
 
@@ -148,7 +164,9 @@ with a foreign one, is 404. A token reaches only its own person's items.
 
 - `Entry` gains `agent: string | null`: the name of the agent whose request wrote the main
   file as it is now, or `null`. `HistoryEntry` gains `agent: string | null` likewise for the
-  text that version holds. (`TrashEntry` does not change.)
+  text that version holds: `null` for a person's version, the name for an agent's, and the
+  words `an agent` for an agent's version whose name is not known (4.2). (`TrashEntry` does
+  not change.)
 - The name is copied when the write is made; revoking the token later does not change it.
 - **Sidebar:** a row whose `agent` is not null shows a small mark beside the time, with the
   name as its title.
@@ -156,7 +174,8 @@ with a foreign one, is 404. A token reaches only its own person's items.
 - **History screens:** a version an agent wrote says so, with the name.
 - When a person's save changes the file, `agent` becomes `null`. A person's save of the same
   bytes writes nothing (SPEC2 4.4, step 4) and the mark stays: the bytes are still the
-  agent's. A person's restore of a version is a person's save.
+  agent's. An agent's save of the same bytes writes nothing either, and leaves the mark as
+  it was. A person's restore of a version is a person's save.
 
 ### 4.2 Where it is kept
 
@@ -177,26 +196,37 @@ users/<user-id>/notes/<id>/
   `current` says who wrote the main file, and counts only while `revision` equals the
   revision of the main file's bytes. `versions` gives the name for each file in
   `agent-history/`.
+- **The file is valid** when it is a JSON object whose `current` is `null` or an object with a
+  string `agent` and a `revision` of 64 hex characters, and whose `versions` is an object of
+  strings. Read in any other state (missing, not a regular file, not JSON, another shape), it
+  is as if it were `{ "current": null, "versions": {} }`.
 - **Whatever cannot be shown to be an agent's is a person's.** The main file is a person's
-  when `current` is null, when its `revision` does not match (a hand edit, SPEC2 4.5, or a
-  crash), or when `writers.json` is missing or not valid JSON of this shape. A version in
-  `agent-history/` without a name in `versions` is shown as written by "an agent".
+  when `current` is null or its `revision` does not match (a hand edit, SPEC2 4.5, or a
+  crash). A version in `agent-history/` without a name in `versions` has the name
+  `an agent`.
 - Both move with the folder to the trash and back, and into the backup, with no new step.
 - `layout.ts`: `NotePart` gains `"writers.json"` and `"agent-history"`, and a version part
   becomes `{ version, kind, agent: boolean }`; `notePath` handles each (the two names join
   its list of literal parts).
 - The index reads `writers.json` whenever it reads the main file.
+- A person who by hand puts back the exact bytes an agent last wrote has a file that counts
+  as the agent's: they are the bytes the agent wrote. This is accepted (section 11).
 
 ### 4.3 Saving, with a writer
 
 SPEC2 4.4's steps, for every save (a person's too), with these changes. "The old text is an
 agent's" means `current` counts (4.2) for the bytes read in step 2.
 
+- **Step 4** (the same bytes: write nothing) is unchanged, for a person and for an agent.
+  `writers.json` is not touched.
 - **Step 5:** the old bytes go to a new version *v*, in `agent-history/` if the old text is
   an agent's, in `history/` otherwise. *v* must be a name in neither folder.
-- **Step 5a, new:** `writers.json` is replaced by rule 3. `versions[v]` is the old agent's
-  name if the old text was an agent's. `current` is `{ agent, revision }` of the bytes about
-  to be written when an agent is saving, or `null` for a person.
+- **Step 5a, new:** `writers.json` is read and written again by rule 3 with two changes, and
+  everything else in `versions` kept: `versions[v]` is the old agent's name if the old text
+  was an agent's; `current` becomes `null`. When the file is not valid and neither change
+  applies, nothing is written. **If this write fails:** a person's save goes on to step 6
+  (its new file cannot match a stale `current`, so it still counts as a person's); an agent's
+  save stops with 500 and the main file is not replaced.
 - **Step 6:** the main file is replaced, as now.
 - **Step 7** becomes:
   - **An agent's request** removes the oldest files of `agent-history/` beyond the newest 10
@@ -204,30 +234,34 @@ agent's" means `current` counts (4.2) for the bytes read in step 2.
     nothing from `history/`, ever.
   - **A person's request** does that, and also removes the oldest files of `history/` beyond
     the newest 50 (20 for a drawing), as now.
-  - The names of removed agents' versions leave `versions` in one more write of
-    `writers.json`; a crash before it leaves names without files, which are ignored.
+- **Step 7a, new:** `writers.json` is written once more when it has something to change: for
+  an agent's save, `current` becomes `{ agent, revision }`, the revision being that of the
+  bytes written in step 6; the names of versions removed in step 7 leave `versions`. A
+  failure here is logged and the save still answers as done.
 
 What follows:
 
-- An agent's first save after a person's puts the person's text into `history/` and removes
-  nothing, so `history/` can hold 51 (21) until the person's next save. That next save
-  removes the oldest, exactly as the person's own save would have had the agent never run.
-- **Every crash errs toward a person.** After step 5a and before step 6, `current.revision`
-  does not match the main file, so the main file counts as a person's. An agent's text can be
-  taken for a person's (and so kept longer); a person's is never taken for an agent's.
+- **A revision is recorded only after its bytes are the main file.** So after a crash at any
+  point, `current` is null or names bytes an agent did write. An agent's text can be taken
+  for a person's (and so kept longer); a person's is never taken for an agent's.
+- An agent's save over a person's text puts that text into `history/` and removes nothing, so
+  `history/` can hold more than 50 (20): one more for each such save, until the person's next
+  save that changes the file removes the oldest beyond the limit, as the person's own save
+  always has. `agent-history/` never holds more than 10 (5) after a save. There is no fixed
+  number for the two together.
 - A create by an agent writes `writers.json` in the new folder before the folder is moved
-  into place.
+  into place, with the revision of the bytes the server writes (after 5.5 has added front
+  matter or `nook`), not of the body sent.
 
-History routes list both folders together, newest first; a version is read from whichever
-folder holds it.
-
-On disk a note can now hold 60 versions and a drawing 25 (of up to 25 MB each).
+History routes list both folders together, newest first. A version is looked for in
+`history/` first, then in `agent-history/`.
 
 ## 5. The interface
 
 All addresses below are under `/api/agent/v1`. Answers are JSON unless said. "Item" means a
-note or a drawing. Every answer that describes one item has `url`: the item's page in the web
-app (`/n/<id>` or `/d/<id>`), for the agent to give its person.
+note or a drawing. Every answer that describes one item has `url`: the full address of the
+item's page in the web app (the server's own address, then `/n/<id>` or `/d/<id>`), for the
+agent to give its person.
 
 **The server's own address,** in `url` and in the guide, is the scheme and `Host` of the
 request itself, read as the `Origin` check reads them. Nook answers on more than one address
@@ -282,28 +316,37 @@ only. There is no restore: to bring a version back, the agent saves its text (5.
 
 A route of its own (the browser's `POST /api/notes` is not reused: no JSON form, no `from`).
 
+One function, `space.agentCreate(bytes, kind, title, tags, writer)`, does it; the browser's
+`create` and `saveAsNew` are not used.
+
 - The body is the document, with the type of its kind: `text/markdown` for a note,
-  `application/vnd.excalidraw+json` for a drawing. A request
-  with `text/markdown` and no body makes an empty note.
-- `title`, if given and not empty, is trimmed and must be at most 300 characters with no
-  control characters, or the request is 422 `bad-title`. `tags` is a list separated by
-  commas; empty parts and repeats are dropped; each other part must match the tag pattern, or
-  the request is 422 `bad-tag` naming it.
+  `application/vnd.excalidraw+json` for a drawing. The route's body limit is that of the
+  browser's create (`DOCUMENT_LIMIT`). A request with `text/markdown` and no body, or a body
+  of no bytes, makes an empty note (the refusals of 3.3 do not apply to a create).
+- `title`, if given and not empty, is trimmed and must be at most 300 characters, none of
+  them a control character (as an agent's name, 2.1), or the request is 422 `bad-title`.
+  `tags` is a list separated by commas; empty parts and repeats are dropped; each other part
+  must match the tag pattern, or the request is 422 `bad-tag` naming it. Both are checked
+  before anything below.
 - **A note.** The body is first checked as a save is (so broken front matter is 422
   `broken-front-matter`). "Has front matter" means `parseNote(text).frontMatter` is not
   null.
-  - Without front matter: the server puts front matter before the body: `title` if given,
-    `tags` if given, `created` (today). With no `title` none is written, and the note's title
-    is its first heading by the rules it has now.
+  - Without front matter: a byte order mark at the start of the body is dropped, and the
+    server puts front matter before the body: a `---` line; `title: "…"` if given, quoted as
+    `newNoteText` quotes; `tags: [a, b]` if any; `created: <today>`; a `---` line; an empty
+    line. Its line endings are the body's first one, or LF when the body has none. With no
+    `title` none is written, and the note's title is its first heading by the rules it has
+    now.
   - With front matter: stored as sent; `title` or `tags` in the address is then 400 with a
     hint to put them in the document.
 - **A drawing.** Without a `nook` key the server parses the JSON, adds
-  `nook: { title, tags, created }` (`title` is `Untitled N` by SPEC2 4.3 when none is given),
-  and writes the object with a two-space indent, its other keys and their order as sent.
-  With a `nook` key of any shape it is stored as sent, and `title` or `tags` in the address
-  is 400.
-- This is the one place the server writes bytes other than those sent (SPEC2 4.4 and
-  DRAWINGS 4.2 say it never does, of a save; that stays true of a save).
+  `nook: { title, tags, created }` as the last key (`title` is `Untitled N` by SPEC2 4.3 when
+  none is given), and writes the object with a two-space indent and a final line break, its
+  other keys and their order as sent. `serializeDrawing` is not used: it would drop parts of
+  the scene. With a `nook` key of any shape it is stored as sent, and `title` or `tags` in
+  the address is 400.
+- This and append (5.6) are the two places the server writes bytes other than those sent
+  (SPEC2 4.4 and DRAWINGS 4.2 say it never does, of a save; that stays true of `PUT`).
 - The size limit of the kind is checked again on the bytes to be written.
 - The answer is 201 `{ id, revision, entry, text, url }`.
 
@@ -312,23 +355,35 @@ A route of its own (the browser's `POST /api/notes` is not reused: no JSON form,
 **`PUT /items/:id`** is SPEC2 4.4 as changed by 4.3: the whole document, the type of the
 item's kind, `If-Match` with the revision.
 
-- The route declares no header schema. The handler takes `If-Match` with or without quotes;
-  when it is missing the answer is 428 `no-revision`; when it is not 64 hex characters, 400.
-- Its other refusals are those of `PUT /api/notes/:id`, and 3.3's. The 409 carries `current`
-  (`text`, `revision`, `entry`) so the agent can merge and send again.
+- The route declares no header schema and has the body limit of the browser's save. The
+  handler takes `If-Match` with or without quotes; when it is missing the answer is 428
+  `no-revision`; when it is not 64 hex characters, 400.
+- **The order of its refusals:** 401; 429; 428 or 400 for `If-Match`; then, inside
+  `space.save`: 404 or 410; 415; 413; 409; the checks of the new bytes (422); `empty` and
+  `missing-image` (3.3), which `space.save` applies only when it is given a writer; then
+  step 4.
+- The 409 carries `current` (`text`, `revision`, `entry`) so the agent can merge and send
+  again, when the current file is valid UTF-8; when it is not, the 409 has no `current`, as
+  now, and its hint says a person must mend the file.
 - The answer is `{ revision, entry, url }`.
 
 **`POST /items/:id/append`**, notes only (a drawing is 415). One function, `space.append`,
-does all of it inside one `space.run`, so nothing can come between its read and its write:
+does all of it inside one `space.run`, so nothing can come between its read and its write.
+The route's body limit is a note's limit and 64 KB.
 
 - The body is `text/markdown`. An empty body, or one of only white space, is 422 `empty`.
 - The line ending is the note's first one, or LF when it has none; the body's line endings
-  are changed to it. A byte order mark at the start of the note stays; one at the start of
-  the body is dropped.
-- The note's trailing white space and line endings are removed; then, unless nothing is left
-  after the front matter, one empty line; then the body with its trailing line endings
-  removed; then one line ending. So there is exactly one empty line between what was there
-  and what was added.
+  are changed to it. A byte order mark at the start of the body is dropped.
+- The note is taken in two parts: its **head** (a byte order mark and the front matter
+  through the line ending of its closing `---`, which is `parseNote`'s front-matter range; or
+  only the byte order mark, or nothing) and its **text** (the rest). Neither the head nor
+  the middle of the text is changed.
+- Spaces, tabs and line endings are removed from the end of the text (no other character:
+  not a kept space, U+00A0), and line endings from the start and the end of the body.
+- The result is: the head; then, if the text is not empty, the text and two line endings;
+  then the body and one line ending. If the head does not end with a line ending and is not
+  empty, one is added after it. So there is exactly one empty line between what was there
+  and what was added, and a note that is only front matter keeps its front matter.
 - `If-Match` is optional. With it, a stale revision is 409.
 - The result is then a save in every way: checked as a save is (so a note whose front matter
   is already broken is 422 `broken-front-matter`, with a hint that a person must mend it),
@@ -367,7 +422,7 @@ does not, the hint is a general one for that status.
 | 422 | `bad-tag`, `bad-title`, `empty`, `missing-image` | 5.5, 3.3 |
 | 428 | `no-revision` | A save without `If-Match` |
 | 429 | `busy` | Over a limit of 3.3 |
-| 500, 503 | `server`, `unavailable` | Nothing is known to have been saved: read before sending again |
+| 500, 503 | `server`, `unavailable` | A save may or may not have been made: read the item before sending again |
 
 The most common mistake, `curl -d` with no `Content-Type`, is the 415, and its hint names the
 three types.
@@ -450,21 +505,23 @@ If `restoreElements` cannot do what 6.3 says, the estimate is made closer and 6.
 
 - `contract`: `auth` as in 3.1 on every route; `LIMITS.agents` (20), `agentChanges` (60),
   `agentBytesPerDay` (300 MB), `agentHistory` (10), `agentDrawingHistory` (5);
-  `PATTERNS.agentToken`; `Agent`; `agent` in `Entry` and
-  `HistoryEntry`; the routes of 2.2 and of section 5; `ErrorBody` allows `error.hint`.
+  `PATTERNS.agentToken` and `agentName`; `Agent`; `agent` in `Entry` and
+  `HistoryEntry`; the routes of 2.2 and of section 5, the three that take a document with
+  the body limits of 5.5 and 5.6 (without one a route has Fastify's 64 KB); `ErrorBody`
+  allows `error.hint`.
 - `errors.ts`: `HttpError` takes a hint and puts it in `error`; `CODES` gains 428.
+- `layout.ts`: `DataLayout.agentsFile` (`config/agents.json`), and 4.2.
 - A new `agents.ts` beside `accounts.ts`: the table, making, revoking, lookup by hash with
-  the user check, the hourly `used`, removal with the user and with a password change; the
-  counts of 3.3.
-- `app.ts`: 3.1 and 3.2 in `onRequest`, `preHandler` and the not-found handler; the handlers
-  of section 5, which call the
-  same `space` functions the browser's routes do, with the writer's name.
-- `space.ts`: `save`, `saveAsNew` and `create` take a writer (`string | null`); 4.3;
-  `append`; the checks of 3.3; `agent` in the index's facts, `entryOf` and `history`;
-  `history` and `version` over both folders. `layout.ts` as in 4.2.
-- `core`: `newNoteText` and `yamlQuote` move here from `space.ts` and gain tags (`fmwriter`
-  cannot write `created`, so it is not used); a function that adds `nook` to a drawing's JSON
-  as 5.5 says.
+  the user check, the hourly `used`, `removeForUserLocked` (2.1); the counts of 3.3.
+- `app.ts`: 3.1 and 3.2 in `onRequest`, `preHandler` and the not-found handler, and
+  `"none"` where it passes `auth: false` today; the handlers of section 5.
+- `space.ts`: `save` takes a writer (`string | null`; the browser's routes pass `null`), with
+  4.3 and, for a writer, the refusals of 3.3; `agentCreate` (5.5) and `append` (5.6), new;
+  `agent` in the index's facts, `entryOf` and `history`; `history` and `version` over both
+  folders. `create` and `saveAsNew` are a person's and do not change.
+- `core`: `newNoteText` and `yamlQuote` move here from `space.ts`, with a second function for
+  the front matter of 5.5 (`fmwriter` cannot write `created`, so it is not used); a function
+  that adds `nook` to a drawing's JSON as 5.5 says; the split of a note for append (5.6).
 
 ## 8. The web app
 
@@ -485,7 +542,7 @@ If `restoreElements` cannot do what 6.3 says, the estimate is made closer and 6.
 | `server`, tokens | Make, list, revoke; the name's rules and the limit of 20; a revoked token is 401 at once; one person cannot see or revoke another's; removing a user, changing a password and `reset-password` remove the tokens; a token of a removed user is 401; the token is in no log line and only its hash is on disk. |
 | `server`, the boundary | 3.4. |
 | `server`, the interface | List; both reads, with the `ETag`; history; create of each kind, with and without `title` and `tags`, with and without front matter or `nook`; each row of 5.8 with its hint; save, 409 with `current`, 428, a quoted `If-Match`; append with and without `If-Match`, for LF and CRLF notes, an empty note, a note ending in empty lines, a note with broken front matter; 410; each limit of 3.3. Every `curl` example of the guide. |
-| `server`, writers | `agent` in entries and history after each mix of person and agent saves. **A note a person saved 50 times, then saved 51 times by an agent, still has every one of the person's versions, by name, and the text the agent first replaced.** The same for a drawing. A person's save after an agent's removes the oldest of the person's beyond 50. A hand edit after an agent's save is a person's. A missing and a broken `writers.json`. A crash after each step of 4.3 is never an agent's text where a person's is. Trash and restore keep both folders. |
+| `server`, writers | `agent` in entries and history after each mix of person and agent saves. **A note a person saved 51 times, so that `history/` is full, then saved 51 times by an agent, still has every one of those 50 version files in `history/`, each with the bytes it had, and the text the agent first replaced as a 51st.** The same for a drawing. A person's save after an agent's removes the oldest of the person's beyond 50. A hand edit after an agent's save is a person's. A missing and a broken `writers.json`. A crash after each step of 4.3 is never an agent's text where a person's is. Trash and restore keep both folders. |
 | `web` stores | The Agents section through the API client with a fake server. |
 | `e2e` | Make a token on the Account screen and copy it; with it, from outside the browser, create a note and the guide's example drawing; both appear in the sidebar with the agent's mark and open; the drawing shows its shapes and labels, opens not unsaved, and is unchanged after a save and a reload. Append to a note open in the browser, then save in the browser and get the conflict. Revoke, and the next request is 401. |
 
@@ -497,7 +554,7 @@ route read the new values. No other existing test changes.
 1. `contract`: `auth`, the limits, the patterns, the types, the routes.
 2. `server`: tokens; the boundary of section 3 and its tests, before any agent route exists.
 3. `server`: writers in `space.ts` (4.2, 4.3) for a person's saves, with every existing test
-   still passing.
+   passing once it has `agent: null` where it compares a whole entry (9).
 4. `core`: front matter and `nook`. `server`: the routes of section 5, the limits of 3.3, the
    guide.
 5. `web`: the Agents section; the marks of 4.1.
@@ -512,6 +569,9 @@ route read the new values. No other existing test changes.
   shows that an agent wrote it; nothing stops the save itself.
 - **A repeated create makes two items,** and a repeated append adds twice, when the first
   answer was lost. The guide says how to avoid the second.
+- **A file put back by hand to an agent's exact bytes** counts as the agent's (4.2), and a
+  later agent save files it in `agent-history/`.
+- **History can pass 50** while agents save over hand edits and no person saves (4.3).
 - **A person editing while an agent saves** gets a conflict on their next save, as with two
   tabs. There is no merge.
 - **Disk.** The limits of 3.3 are per day and in memory: over many days, or across restarts,
@@ -538,6 +598,30 @@ SPEC-DRAWINGS 4.4 (agents' versions: 5).
    agent can understand a note with pictures. Adding photos stays out either way.
 
 ## 14. Changes since draft 1
+
+**Draft 4.** From a check of draft 3 against the code by seven AI models (two did not
+answer). Three of them traced 4.3 through every save, crash and hand edit and found the
+design sound; all seven found places a builder would have had to guess.
+
+- **Append** kept no line break after a note that is only front matter, which would have
+  joined the added text to the closing `---` and lost the title and tags. It now takes the
+  note as a head and a text (5.6). Four found this.
+- **`writers.json`** records a revision only after its bytes are the main file (4.3, step
+  7a), so no crash followed by a hand edit can make a person's text count as an agent's. Its
+  valid shape is defined; step 5a keeps the names already in it; a failed write has a rule.
+- **`"none"`** covers the pages, the bundle and the favicon, which draft 3 would have put
+  behind a session (3.1). Five found this.
+- **Unknown agent addresses** skip the body-type check as well as the `Origin` check, and
+  the prefix is exactly `/api/agent/` (3.2).
+- **`empty` and `missing-image`** compare with the document being replaced, count only
+  elements not marked deleted, and apply to a save and an append, not to a create (3.3).
+- **Tokens are removed before `users.json` is written,** by a function that assumes the
+  accounts lock (2.1). An agent's name has its own pattern.
+- **Create** has its own function; the front matter's lines, line endings and byte order mark
+  are given; the revision recorded is of the bytes written (4.3, 5.5).
+- The order of a save's refusals, the body limits of the three document routes, `url` as a
+  full address, `an agent` for an unnamed version, and what a 500 means are stated. The
+  count of versions on disk is no longer given as a fixed number, because it is not one.
 
 **Draft 3.** The owner took the short form for drawings back out of this version (1.1, 3)
 after the converter check showed its cost. Section 6 keeps the design; the body type, the
