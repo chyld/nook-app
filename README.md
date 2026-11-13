@@ -83,11 +83,50 @@ password-file`).
 | Command | What it does |
 |---|---|
 | `add-user <name>` | Makes an account (password of 5 to 256 characters) |
-| `reset-password <name>` | Sets a new password and ends that user's sessions |
-| `remove-user <name>` | Removes the account and its sessions; their folder moves to `removed/` |
+| `reset-password <name>` | Sets a new password, ends that user's sessions and revokes their agents' tokens |
+| `remove-user <name>` | Removes the account, its sessions and its agents' tokens; their folder moves to `removed/` |
 | `list-users` | Name, id and date of every account |
 | `new-id` | A fresh note id, for adding a note by hand |
 | `pause-writes`, `resume-writes`, `backup-done` | Used by the backup |
+
+## Agents
+
+An AI agent (a command-line coding agent with `curl`, say) can list, read, create and save
+your notes and drawings over HTTP. It cannot delete anything, move anything to the trash, or
+touch photos, fonts, styles or your account. `SPEC-AGENTS.md` is the specification.
+
+1. On the **Account** screen, under **Agents**, type a name for the agent ("Claude on the
+   laptop") and press **Make a token**. The token is shown once: copy it.
+2. Give the agent the token and the address of its guide, shown beside the token:
+   `https://<your address>/api/agent/v1`. The guide is one page, needs no token, and tells the
+   agent everything: each route with a `curl` example, the limits, a complete example note and
+   drawing, and every error with what to do about it.
+
+For example, with the token in `NOOK_TOKEN`:
+
+```sh
+curl -sS -X POST "https://localhost:9988/api/agent/v1/items?title=Shopping&tags=food" \
+  -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" --data-binary '- oats'
+```
+
+(With the certificate Caddy makes for `localhost` or an IP address, `curl` needs `-k`.)
+
+What to know:
+
+- **What an agent wrote is marked.** A note or drawing whose current text an agent wrote has a
+  small robot in the sidebar and "Written by *name*" in its header, until you save a change.
+  History says which versions an agent wrote.
+- **An agent cannot push your versions out of history.** Its own versions are kept apart (the
+  newest 10 of a note, 5 of a drawing). To undo what an agent did, restore a version from
+  History as usual.
+- **An agent's save while you have the note open** shows up as a conflict on your next save,
+  as a second tab's would.
+- **Revoke** an agent on the Account screen; its token stops working at once. Changing your
+  password revokes all of them.
+- **Limits:** at most 20 agents; together they may make 60 changes a minute and send 300 MB a
+  day. An agent's save that would empty a note or a drawing, or drop an image a drawing uses,
+  is refused.
+- A token is a secret: whoever has it can read all your notes and write to them.
 
 ## Where things are on disk
 
@@ -102,11 +141,12 @@ start. Nothing is in a Docker volume, so copying `data/` copies the whole app's 
 `data/notes/` (which the app and the scripts see as `/srv/notes`):
 
 ```
-config/users.json, sessions/, backup.json, tmp/
+config/users.json, agents.json, sessions/, backup.json, tmp/
 cache/google-fonts.json, font-previews/, tmp/
 removed/<user-id>-<date>/
 users/<user-id>/notes/<note-id>/note.md, note.assets/<photo>, history/<version>.md
 users/<user-id>/notes/<drawing-id>/drawing.excalidraw, history/<version>.excalidraw
+users/<user-id>/notes/<id>/agent-history/<version>.*, writers.json   (only where an agent wrote)
 users/<user-id>/trash/<note-id>/          (a note folder moved whole, plus trashed.json)
 users/<user-id>/fonts/<slug>/, styles.json, tmp/
 ```

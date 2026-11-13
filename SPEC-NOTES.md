@@ -446,3 +446,81 @@ What changed in behaviour:
   frames.
 - **A note saved as new from a drawing's id** takes no photos from it, so its photos are
   reported missing.
+
+# Notes on SPEC-AGENTS.md (draft 4)
+
+Where the agents build departs from `SPEC-AGENTS.md`, or that document was silent. Section
+numbers are that document's. Section 6 (the short form for drawings) is not built.
+
+## Section 2: tokens
+
+- A bad name is 400 with the code `bad-name`. An unknown value in the body of
+  `POST /api/agents` is dropped, and a number for `name` is read as its digits, as Fastify
+  does on every route.
+- `agents.json` is `{ "agents": [ … ] }`. A file that is not JSON, or not that shape, is an
+  empty table and is logged: no token works until a person makes one.
+- The token of an `Authorization` header is read without regard to the case of `Bearer` or
+  the spaces after it.
+- Writing a token's last use happens inside the request that finds it stale by an hour, under
+  the accounts lock. If the write fails the request goes on.
+- A token's id is 16 base-32 characters (`PATTERNS.agentId`).
+- The Account screen's test ids are those of section 8 and `agent-guide`, `agent-close`,
+  `agent-error` and `password-revokes`. Leaving the screen forgets a token still shown.
+
+## Section 3: the boundary
+
+- **A request is checked against its route's schema before its token.** So a request with a
+  malformed id and no token is 400, not 401, as on the browser's routes. With an address that
+  fits its route, the order is that of 5.6.
+- **An address value a route does not have is dropped,** not refused, as Fastify does on every
+  route: `?from=…` on create does nothing.
+- **Counting (3.3)** happens when the token is accepted, which in Fastify is after the body
+  has been received. The bytes counted are the body's length. A request refused for the
+  minute's limit counts toward the minute; one refused for the day's limit does not add its
+  bytes. The 429 for bytes carries `size`, `used` and `limit` beside `error`.
+- `empty` and `missing-image` are in `space.save`, which applies them when it is given a
+  writer. They are skipped when the file being replaced cannot be read as text or, for a
+  drawing, as JSON. The 422 `missing-image` carries `file`; `bad-tag` carries `tag`.
+- A file id is counted as held only when it is the `files` object's own key.
+
+## Section 4: who wrote what
+
+- The steps of a save have two more names for the tests: `save:writers` (after 5a) and
+  `save:pruned` (after 7).
+- **The index forgets an item whenever its `writers.json` is written,** so the next read takes
+  the writer from disk even when the main file is the same. Without this a save stopped
+  between 5a and 6 left the list showing the old mark until the file next changed.
+- `writers.json` that is a folder or a link is read as not valid. A person's save with nothing
+  to record writes no `writers.json`, so an item no agent has touched never gets one.
+- **Step 5a failing for an agent's save** (the file valid and readable, yet not replaceable)
+  has no test: no way was found to bring that state about without also stopping step 5. The
+  case where it can be neither read nor written is tested: every text is then a person's and
+  saves go on.
+- When step 5a fails for an agent's save, the version file that step 5 made stays: one extra
+  copy of the current text, as SPEC2 4.4 already allows after a crash.
+
+## Section 5: the interface
+
+- `{{SERVER}}` in `agent-guide.md` is where the server's address goes.
+- `GET /items/:id/text` answers 422 `not-utf8` for a file that is not UTF-8, as the JSON read
+  does: it does not send bytes it cannot check.
+- A create with the drawing type and no body is 422 `not-json`. Only a note can be made empty.
+- The title of 5.5 is trimmed and otherwise kept as sent (not collapsed as the browser's
+  create does). Its limit of 300 counts characters, not bytes.
+- An `If-Match` that is not a revision is 400 on append too.
+- Append to a note that is not valid UTF-8 is 422 `not-utf8` with a hint that a person must
+  mend it.
+- A hint is added by the error handler for every answer of 400 or above on an agent address.
+  A schema failure's hint is Fastify's own message, which names the part at fault
+  (`params/id must match pattern …`), and the guide's address.
+
+## Section 9: the tests
+
+- "Every `curl` example of the guide" is run by reading each `curl` line of the guide and
+  sending the same request to the server in the test process (`fastify.inject`), with `$ID`,
+  `$REVISION` and `$VERSION` taken from the answers before, in the guide's order. `curl`
+  itself is not run.
+- The e2e agent is the test's own `fetch` against the real server, with a token and no
+  cookie.
+- "A crash after each step of 4.3" stops the save by throwing at the step, in the same
+  process, which leaves the disk as a crash there would; the server is not restarted.

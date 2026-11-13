@@ -127,3 +127,30 @@ SPEC-NOTES.md, "Notes on SPEC-DRAWINGS.md".
       and "a change followed at once by leaving asks first" rewritten so that it fails without
       `flush()`). Full run: typecheck and lint clean; core 99/99, server 75/75, web 83/83,
       e2e 78/78.
+
+## Agents (2026-11-13, `SPEC-AGENTS.md` draft 4, branch `worktree-agent-api-spec`)
+
+Build order of SPEC-AGENTS section 10. What departs from the spec is in SPEC-NOTES.md, "Notes
+on SPEC-AGENTS.md". Section 6 of the spec (a short form for drawings) is not built, by the
+owner's decision.
+
+- [x] 1. `contract`: `auth` as `"session" | "token" | "none"` on every route; the limits and
+      patterns of agents; `Agent`; `agent` in `Entry` and `HistoryEntry`; `hint` in an error;
+      the three routes of the browser and the nine under `/api/agent/v1`.
+- [x] 2. `server`: `agents.ts` (tokens as hashes in `config/agents.json`, the limits of 3.3);
+      tokens removed with a user and with a password change, before `users.json` is written;
+      the boundary in `app.ts` (a token or a cookie, never both; no `Origin` check and a 404
+      with a hint under `/api/agent/`).
+- [x] 3. `server`: writers in `space.ts`: `writers.json`, `agent-history/`, the steps 5a and
+      7a, and what each kind of request may remove.
+- [x] 4. `core`: `agentdoc.ts` (front matter for a created note, `nook` for a created drawing,
+      a note as head and text for append, the comparisons of 3.3) with
+      `core/test/agentdoc.test.ts` (15). `server`: the routes of section 5, `agent-hints.ts`,
+      `agent-guide.md`; `server/test/agents.test.ts` (35).
+- [x] 5. `web`: the `agents` store and the Agents section of the Account screen; the marks in
+      the sidebar, the two headers and the two history screens; `web/test/agents.test.ts` (5).
+- [x] 6. `e2e/agents.test.ts` (2), README.md, SPEC-NOTES.md, this file, and the changes to
+      SPEC2.md (marked "(SPEC-AGENTS)").
+- [x] Full run (2026-11-13): typecheck and lint clean; core 114/114, server 110/110, web
+      88/88, e2e 80/80. No Docker command was run: the running stack has not been rebuilt
+      with agents.

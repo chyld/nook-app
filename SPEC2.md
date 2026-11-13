@@ -8,6 +8,11 @@ what changed since each earlier draft.
 Excalidraw, beside notes. It changes the sections its section 11 lists; each change is marked
 here with "(SPEC-DRAWINGS)". Where this document and that one differ, that one wins.
 
+**Agents.** `SPEC-AGENTS.md` (draft 4, built 2026-11-13) adds an HTTP interface with which an
+AI agent that a person has given a token can list, read, create and save that person's notes
+and drawings, and never delete. It changes the sections its section 12 lists; each change is
+marked here with "(SPEC-AGENTS)". Where this document and that one differ, that one wins.
+
 **"Version 1" means the app as it runs today** from `app/`. `DESIGN.md` and `EDITOR-PLAN.md` are
 older than the code and wrong in places; where they differ from the running app, the app wins.
 The differences that matter are listed in 1.2.
@@ -131,6 +136,9 @@ All sizes in this document are in bytes: 1 MB is 1,048,576 bytes.
     notes/<drawing-id>/              (SPEC-DRAWINGS) a drawing, in the same id space
       drawing.excalidraw
       history/<version>.excalidraw
+    notes/<id>/                      (SPEC-AGENTS) only where an agent has written:
+      agent-history/<version>.md     the versions whose text an agent wrote
+      writers.json                   who wrote the main file and each of those versions
     trash/<note-id>/                 a note folder moved here whole, plus trashed.json
     fonts/<family-slug>/font.css, *.woff2
     styles.json
@@ -203,6 +211,14 @@ sends the new bytes as the request body and the revision it started from in `If-
 A crash leaves the old note or the new one, never a partial file, and at worst one extra
 history file. The server never changes the bytes of a save.
 
+(SPEC-AGENTS 4.3) Every save, a person's too, has a writer. In step 5 the old bytes go to
+`agent-history/` when an agent wrote them, to `history/` otherwise. A step 5a writes
+`writers.json` before the main file is replaced, and a step 7a after. In step 7 any save
+removes agents' versions beyond the newest 10 (5 for a drawing), and only a person's save
+removes a person's versions beyond the newest 50 (20): an agent's request removes nothing from
+`history/`, so `history/` can hold more than 50 until a person's next save. An agent's save
+and append are refused when they would empty a document or drop an image a drawing uses.
+
 (SPEC-DRAWINGS) A drawing is saved the same way, with `drawing.excalidraw` for `note.md`: its
 body is the whole file (`application/vnd.excalidraw+json`, images included), at most 25 MB, and
 step 3 checks only that it is valid UTF-8 and a JSON object with `type` "excalidraw" and an
@@ -272,6 +288,11 @@ copied but not restored.
 its history screen is `/d/<id>/history`, which shows a version in Excalidraw in view mode and
 restores it the same way. Every version is a whole file, so every version can be restored.
 
+(SPEC-AGENTS 4) The history routes list `history/` and `agent-history/` together, newest
+first, and each version says in `agent` who wrote its text: `null` for a person, the agent's
+name, or `an agent` when the name is not recorded. A version is read from whichever folder
+holds it, `history/` first. Restoring a version is a person's save.
+
 ### 4.7 Save as a new note
 
 Offered when a save meets 410 or 404, and for a draft whose note is gone. The browser sends the
@@ -282,6 +303,14 @@ text uses photos and the source could not be found. The editor switches to the n
 says so when photos are missing.
 
 ## 5. Accounts, sessions and security
+
+(SPEC-AGENTS 2, 3) A person's agents have tokens, kept as SHA-256 hashes in
+`config/agents.json`. A route is let in by one of three ways (`auth` in `contract`): the
+session cookie, an agent's token, or no check. The routes under `/api/agent/v1` take a token
+and never a cookie; every other route that needs a session takes the cookie and never a
+token. The `Origin` check below does not apply to a request under `/api/agent/`. Removing a
+user, changing a password and `reset-password` remove that user's tokens before `users.json`
+is written, as they end sessions.
 
 - **Accounts:** `config/users.json` holds user id, username, argon2id hash and created date.
   Passwords are at least 12 and at most 256 characters; usernames at most 64.
@@ -359,6 +388,13 @@ An error answer is `{ error: { code, message } }`. A 409 on save adds
 
 (SPEC-DRAWINGS) Every list and trash entry carries `kind` ("note" or "drawing"). The photo and
 asset routes answer 404 for a drawing.
+
+(SPEC-AGENTS) Every list entry carries `agent`: the name of the agent whose request wrote the
+file as it is now, or `null`. Three more routes for the browser list, make and revoke a
+person's agents (`GET` and `POST /api/agents`, `DELETE /api/agents/:id`). The agent routes
+are SPEC-AGENTS section 5: the guide, list, read, the raw text, history, create, save and
+append, under `/api/agent/v1`; none deletes. An error on an agent address has `hint` inside
+`error`, and a save there without `If-Match` is 428.
 
 JSON bodies are at most 64 KB (1 KB for login and password). Every `/api` route but login needs
 a session. Answers carry `Cache-Control: no-store`, except photos and font files (`private`).
@@ -785,7 +821,7 @@ today. They are the reference for the mechanisms below.
 | `/trash` | Trashed notes: read, restore, empty one or all |
 | `/fonts` | The catalogue by name and category, with "Show more"; add and remove fonts |
 | `/styles` | Saved styles: rename, edit as text, delete |
-| `/account` | Change password, log out, the last backup time (a warning when over two days old) |
+| `/account` | Change password, log out, the last backup time (a warning when over two days old); (SPEC-AGENTS 2.2) the person's agents: make a token, shown once, and revoke |
 
 `/` and `/n/<id>` share a layout: the sidebar on the left and the screen on the right. The other
 screens have a top bar with the same links. A router of about 60 lines over the History API maps
@@ -948,6 +984,12 @@ screen, so a test can read the raw text and drive the core without knowing the l
 `note-trash`; its history screen uses `history-row` and `history-restore`. On the drawing
 screen `window.__drawing = { text(), addText(text, x, y), setBackground(colour),
 addImage(file) }`.
+
+(SPEC-AGENTS 8) On the Account screen: `agents`, `agent-row` (with `data-name`), `agent-name`,
+`agent-make`, `agent-token`, `agent-guide`, `agent-copy`, `agent-close`, `agent-revoke`,
+`agent-error`, `password-revokes`. `written-by` on the editor's and the drawing screen's
+header. `agent-mark` in a sidebar row. `note-row` and `history-row` have `data-agent` (the
+name) when an agent wrote the text.
 
 ## 12. Tests the builders write
 
