@@ -191,3 +191,42 @@ test("an agent appends to a note open in the browser; the person's next save is 
   assert.ok(body.error.hint.includes(`${s.url}${A}`));
   await f.close();
 });
+
+test("the guide's formatting example, created by an agent, opens in the editor with its styles and nothing left as typed", async () => {
+  const f = await fresh();
+  const { p } = f;
+  const token = await makeAgent(p, "Formatter");
+  const guide = await (await fetch(`${s.url}${A}`)).text();
+  const example = [...guide.matchAll(/```markdown\n([\s\S]*?)```/g)].map((m) => m[1]).find((t) => t.includes("spacing:"))!;
+  const made = await agent(token)("POST", `${A}/items`, example, { "content-type": "text/markdown" });
+  assert.equal(made.status, 201, await made.clone().text());
+  const n = (await made.json()) as { id: string; url: string };
+  await p.goto(n.url);
+  await p.getByTestId("editor").waitFor();
+  await p.waitForFunction(() => (window as unknown as { __notes?: unknown }).__notes !== undefined);
+  // The note is the example, byte for byte, with the title and tag of its front matter.
+  assert.equal(await notesText(p), example);
+  assert.equal((await p.getByTestId("note-title").textContent())!.trim(), "Lisbon trip");
+  assert.equal(await p.getByTestId("save-status").getAttribute("data-state"), "saved", "it does not open unsaved");
+  if ((await p.getByTestId("editor").getAttribute("data-mode")) !== "rich") await p.getByTestId("mode-toggle").click();
+  assert.equal(await p.getByTestId("editor").getAttribute("data-mode"), "rich");
+  // In Rich the styles are drawn and their marks are hidden: what is shown has no attribute
+  // list, no span brackets and no shorthand marks left as typed.
+  const shown = await p.getByTestId("editor").innerText();
+  for (const text of ["Lisbon trip", "Friday the 14th", "book the tram tickets", "sunscreen", "Do not forget the passport", "Renew the passport", "Saudade", "the city guide", "Flights"]) assert.ok(shown.includes(text), text);
+  for (const mark of ["{color", "{bg", "{size", "]{", "++book", "==sunscreen", "**Do not"]) assert.equal(shown.includes(mark), false, `${mark} is not left showing`);
+  // A styled piece has the colour the guide says: the red span is drawn in the note's red.
+  const colour = await p.evaluate(() => {
+    const walker = document.createTreeWalker(document.querySelector('[data-testid="editor"]')!, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent?.includes("Friday the 14th")) return getComputedStyle(n.parentElement!).color;
+    return null;
+  });
+  const plain = await p.evaluate(() => {
+    const walker = document.createTreeWalker(document.querySelector('[data-testid="editor"]')!, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent?.includes("Leave on")) return getComputedStyle(n.parentElement!).color;
+    return null;
+  });
+  assert.ok(colour && plain && colour !== plain, `the span has its own colour: ${colour} beside ${plain}`);
+  assert.deepEqual(f.errors.filter((e) => /Content Security Policy|Refused to/i.test(e)), []);
+  await f.close();
+});

@@ -1117,7 +1117,7 @@ test("the guide: its formatting example is a note the format reads as the guide 
   const { html, meta } = renderNote(example);
   // Every form in it is read: no brace is left showing, and each style is where the guide puts it.
   assert.equal(/[{}]/.test(html), false, html);
-  assert.equal(html.includes("]"), false, "no bracket of a span is left showing");
+  assert.equal(html.replace(/<pre>[\s\S]*?<\/pre>/g, "").includes("]"), false, "no bracket of a span is left showing");
   assert.match(html, /<h1 style="color: var\(--note-indigo\)">Lisbon trip<\/h1>/, "a block line under a heading");
   assert.match(html, /<span style="color: var\(--note-red\)">Friday the 14th<\/span>/, "a span");
   assert.match(html, /<u>book the tram tickets<\/u>/, "++underline++");
@@ -1152,4 +1152,68 @@ test("the guide: its formatting example is a note the format reads as the guide 
   // A block line does not style a list; a span in a list item does.
   assert.ok(renderNote("- one\n- two\n{color=red}\n").html.includes("{color=red}"));
   assert.ok(renderNote("- [one]{color=red}\n").html.includes("color: var(--note-red)"));
+});
+
+test("the guide: every thing the editor offers is in its table, written as the format reads it", async () => {
+  const s = await startServer();
+  const guide = (await s.app.inject({ method: "GET", url: A, headers: { host: HOST } })).body;
+  const section = guide.slice(guide.indexOf("## Formatting a note"), guide.indexOf("## Read"));
+  // The toolbar of SPEC2 9.4, the header and Note settings: each has a row.
+  const offered = ["Title, tags", "Bold", "Italic", "Underline", "Strikethrough", "Inline code", "Text colour", "Highlight", "Font", "Size", "Link", "Normal text", "Heading 1 to 6", "Quote", "Code block", "Bullets", "Numbers", "Tasks", "Table", "Horizontal line", "Photo", "Saved styles", "Note settings: font, size, paragraph spacing"];
+  for (const name of offered) assert.ok(section.includes(`| ${name} |`), `a row for ${name}`);
+  // Each form the table and the details give is read as they say.
+  const reads: [source: string, shown: RegExp][] = [
+    ["**text**", /<strong>text<\/strong>/],
+    ["*text*", /<em>text<\/em>/],
+    ["++text++", /<u>text<\/u>/],
+    ["~~text~~", /<del>text<\/del>/],
+    ["`text`", /<code>text<\/code>/],
+    ["[text]{color=red}", /<span style="color: var\(--note-red\)">text<\/span>/],
+    ["==text==", /<mark>text<\/mark>/],
+    ["[text]{bg=mint}", /background-color: var\(--note-mint\)/],
+    ["[text]{font=serif}", /font-family/],
+    ["[text]{size=14pt}", /font-size: 14pt/],
+    ["[text](https://example.com)", /<a href="https:\/\/example\.com">text<\/a>/],
+    ["see https://example.com now", /<a href="https:\/\/example\.com">/],
+    ["one\n\ntwo", /<p>one<\/p>\s*<p>two<\/p>/],
+    ["# Heading", /<h1>Heading<\/h1>/],
+    ["###### Heading", /<h6>Heading<\/h6>/],
+    ["> text\n> more", /<blockquote>\s*<p>text\nmore<\/p>/],
+    ["```\ncode **x**\n```", /<pre><code>code \*\*x\*\*\n<\/code><\/pre>/],
+    ["~~~python\nx = 1\n~~~", /<pre><code class="language-python">x = 1/],
+    ["- item", /<ul>\s*<li>item<\/li>/],
+    ["1. item", /<ol>\s*<li>item<\/li>/],
+    ["- [ ] to do\n- [x] done", /<input type="checkbox" disabled> to do[\s\S]*<input type="checkbox" disabled checked> done/],
+    ["| a | b |\n|:--|--:|\n| 1 | 2 |", /<th style="text-align: left">a<\/th>\s*<th style="text-align: right">b<\/th>/],
+    ["| a |\n|:-:|\n| x \\| y |", /<td style="text-align: center">x \| y<\/td>/],
+    ["| a |\n|---|\n| **b** [c]{color=red} [d](https://x.example) |", /<td><strong>b<\/strong> <span style="color: var\(--note-red\)">c<\/span> <a href="https:\/\/x\.example">d<\/a><\/td>/],
+    ["text\n\n---\n\nmore", /<p>text<\/p>\s*<hr>\s*<p>more<\/p>/],
+    ["one\\\ntwo", /one<br>\s*two/],
+    ["one\ntwo", /<p>one\ntwo<\/p>/],
+    ["- outer\n  - inner", /<li>outer\s*<ul>\s*<li>inner<\/li>/],
+    ["1. outer\n   - inner", /<li>outer\s*<ul>\s*<li>inner<\/li>/],
+    ["[text]{color=red bg=mint}", /color: var\(--note-red\); background-color: var\(--note-mint\)/],
+    ["`[x]{color=red} ==y==`", /<code>\[x\]\{color=red\} ==y==<\/code>/],
+    ["\\*a\\* \\# \\[x\\]\\{color=red\\} \\+\\+u\\+\\+ \\=\\=h\\=\\=", /<p>\*a\* # \[x\]\{color=red\} \+\+u\+\+ ==h==<\/p>/],
+    ["![x](https://example.com/a.png)", /<span class="note-image-placeholder"[^>]*>x<\/span>/],
+    ["<b>x</b> and <br>", /&lt;b&gt;x&lt;\/b&gt; and &lt;br&gt;/],
+    ["[a [link](https://x.example) b]{color=red}", /<span style="color: var\(--note-red\)">a <a href="https:\/\/x\.example">link<\/a> b<\/span>/],
+    ["> a [quote]{color=red}", /<blockquote>\s*<p>a <span style="color: var\(--note-red\)">quote<\/span>/],
+    ["# A [red]{color=red} heading", /<h1>A <span style="color: var\(--note-red\)">red<\/span> heading<\/h1>/],
+  ];
+  for (const [source, shown] of reads) assert.match(renderNote(source).html, shown, JSON.stringify(source));
+  // A span inside a span, and two sets of braces, are not read: the guide says to use one.
+  assert.ok(renderNote("[[x]{color=red}]{bg=mint}").html.includes("]{bg=mint}"));
+  assert.ok(renderNote("[x]{color=red}{bg=mint}").html.includes("{bg=mint}"));
+  // A span wins over a block line, and only for what it sets.
+  assert.match(renderNote("All [this]{color=red} text.\n{color=gray size=small}\n").html, /<p style="color: var\(--note-gray\); font-size: 0\.875em">All <span style="color: var\(--note-red\)">this<\/span> text\.<\/p>/);
+  // The highlighter shades are the editor's own twelve, and every colour of its palette is named.
+  const { HIGHLIGHTS, PALETTE } = await import("../../web/src/palette.ts");
+  assert.equal(HIGHLIGHTS.length, 12);
+  for (const [name, hex] of HIGHLIGHTS) assert.ok(section.includes(`${name} \`${hex}\``), `${name} ${hex}`);
+  for (const name of PALETTE) assert.ok(new RegExp("^\\| `color` \\|.*`" + name + "`", "m").test(section), name);
+  // The note settings of the front matter are the keys the app writes.
+  for (const key of ["font", "size", "spacing"]) assert.ok(section.includes("`" + key + "`"), key);
+  // A horizontal line first, in a note without front matter, with a second one after it.
+  assert.equal(renderNote("---\ntitle: x\n---\n\ntext\n").html.includes("<hr>"), false, "read as front matter, as the guide warns");
 });

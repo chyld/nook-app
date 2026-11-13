@@ -74,10 +74,39 @@ Answer, status 201: `{ "id": "…", "revision": "…", "entry": { … }, "text":
 
 ## Formatting a note
 
-The body of a note is Markdown: headings, **bold**, *italic*, ~~strikethrough~~, lists, task
-lists (`- [ ]`, `- [x]`), tables, quotes, code, links. HTML is not read: `<b>x</b>` is shown as
-typed. Plain Markdown is enough for most notes. For colour, size, fonts, underline and
-highlight, Nook adds the forms in this example, which is a complete note:
+Everything a person can do to a note with Nook's toolbar, you can write as text. This section
+lists all of it. Plain Markdown is enough for most notes; the rest is for colour, size, fonts,
+underline and highlight.
+
+### What the editor offers, and how to write it
+
+| In the editor | Written as |
+|---|---|
+| Title, tags | `title` and `tags` in the front matter (see Items) |
+| Bold | `**text**` |
+| Italic | `*text*` |
+| Underline | `++text++` |
+| Strikethrough | `~~text~~` |
+| Inline code | `` `text` `` |
+| Text colour | `[text]{color=red}` |
+| Highlight | `==text==` for the usual yellow, or `[text]{bg=mint}` for another colour |
+| Font | `[text]{font=serif}` |
+| Size | `[text]{size=14pt}` |
+| Link | `[text](https://example.com)`; a bare `https://…` address is a link too |
+| Normal text | a paragraph: lines of text, with an empty line between paragraphs |
+| Heading 1 to 6 | `# Heading` to `###### Heading` |
+| Quote | `> text` at the start of each line |
+| Code block | a line of three backticks (or three `~`), the code, and the same line again; a language name may follow the first, as in the example |
+| Bullets | `- item` |
+| Numbers | `1. item` |
+| Tasks | `- [ ] to do` and `- [x] done` |
+| Table | rows of cells between `\|`, with a line of dashes under the first row |
+| Horizontal line | `---` on a line of its own, with an empty line before and after |
+| Photo | you cannot add one; see below |
+| Saved styles | no form of their own: a saved style is the colour, highlight, font, size, bold, italic, underline and strikethrough it holds, so write those |
+| Note settings: font, size, paragraph spacing | `font`, `size` and `spacing` in the front matter |
+
+This complete note uses most of it:
 
 ```markdown
 ---
@@ -93,22 +122,50 @@ spacing: 1.5
 {color=indigo}
 
 Leave on [Friday the 14th]{color=red}, and ++book the tram tickets++ before then.
-Pack ==sunscreen== and the [window seat]{bg=mint} confirmation.
+Pack ==sunscreen== and the [window seat]{bg=mint} confirmation, and ~~the umbrella~~.
 
 [**Do not forget the passport**]{color=white bg=red size=large}
 
 This paragraph is grey and small, set by the line under it.
 {color=gray size=small}
 
-| Item    | Paid               |
-|:--------|:-------------------|
-| Flights | [yes]{color=green} |
-| Hotel   | ==no==             |
+## To do
+
+- [x] Renew the passport
+- [ ] Buy insurance
+  - compare [two offers]{color=blue}
+- [ ] Run `convert --eur` before paying
+
+1. Book the flights
+2. Reserve the hotel
+   - near Alfama
+
+> "Saudade" has no exact translation.
+> It is closer to a feeling than a word.
+
+See [the city guide](https://example.com/lisbon).
+
+---
+
+## Costs
+
+| Item    | Cost (EUR) | Paid               |
+|:--------|-----------:|:------------------:|
+| Flights |        240 | [yes]{color=green} |
+| Hotel   |        510 | ==no==             |
+
+~~~python
+total = sum([240, 510])
+~~~
 ```
 
+### The forms Nook adds
+
 - **A styled span** is `[text]{key=value key=value}`: brackets round the text, then braces. It
-  works anywhere text does: in a paragraph, a list item, a table cell, a heading, and round
-  other formatting such as `**bold**`.
+  works anywhere text does: in a paragraph, a list item, a table cell, a quote, a heading, and
+  round other formatting such as `**bold**` or a link.
+- **One span, all its keys.** A span cannot be put inside another span, and two sets of braces
+  cannot follow one text: for red text on mint write `[text]{color=red bg=mint}`.
 - **A block line** is a line holding only `{key=value}`, straight under a heading or as the
   last line of a paragraph, with an empty line after it. It styles the whole heading or
   paragraph. It does not work under a list, a table or a quote: use spans there.
@@ -119,8 +176,8 @@ This paragraph is grey and small, set by the line under it.
 | Key | Values |
 |---|---|
 | `color` | `red`, `orange`, `yellow`, `green`, `mint`, `teal`, `blue`, `indigo`, `purple`, `pink`, `brown`, `gray`, `black`, `white`, or a hex colour such as `#2b6cb0` |
-| `bg` | the same, or `highlight` |
-| `size` | `xs`, `small`, `normal`, `large`, `xl`, `xxl`; or pixels from `6px` to `200px`; or points such as `14pt` |
+| `bg` | the same, or `highlight` (the usual yellow, as `==text==`). The editor's twelve highlighter shades are hex colours: yellow `#fff176`, amber `#ffd68a`, peach `#ffc09f`, rose `#ffb3b3`, pink `#ffb8de`, purple `#e3c2ff`, lavender `#c9ceff`, blue `#b3dcff`, aqua `#a8ecf0`, mint `#b2f0d0`, green `#c5f09a`, silver `#dcdce0` |
+| `size` | points, as the editor's size box writes: `14pt` (from `1pt` to `400pt`, one decimal at most); or pixels from `6px` to `200px`; or `xs`, `small`, `normal`, `large`, `xl`, `xxl`, which scale the size the text would have had |
 | `font` | `serif`, `sans`, `mono`; or the name of a font the person has added on Nook's Fonts screen, in quotes when it has a space: `font="Source Serif 4"` |
 | `underline` | `yes` or `no` |
 
@@ -132,7 +189,39 @@ The syntax is strict, and a mistake is never reported: it is only shown.
 - A key or value that is not in the table is ignored: `[x]{color=crimson}` shows a plain `x`.
   Prefer the named colours to hex: they stay readable in the dark theme.
 - A font the person has not added leaves the text in its usual font.
-- Under an image, a line such as `{width=70%}` is the photo's width. Keep it as it is.
+- **Which style wins:** a span over a block line, a block line over the note's front matter.
+  Only what the stronger one sets is replaced; the rest is kept.
+
+### Details of plain Markdown that matter
+
+- **Paragraphs and lines.** An empty line ends a paragraph. A single line break inside a
+  paragraph is not shown as one: end a line with a backslash (`\`) to break the line there.
+- **Lists inside lists.** Indent the inner item under the text of the outer one: two spaces
+  under a `- ` item, three under a `1. ` item. A task is a bullet whose text starts `[ ] ` or
+  `[x] `.
+- **Tables.** The first row is the header. The second row sets how each column is lined up:
+  `:--` left, `--:` right, `:-:` centred. Each row is one line: a cell cannot hold a line
+  break, a list or a code block. Text in a cell can be bold, a link, or a styled span. Write
+  `\|` for a bar inside a cell.
+- **Code.** Nothing is styled inside inline code or a code block: there, every character is
+  shown as typed.
+- **Links.** `http://`, `https://` and `mailto:` addresses open; a link to anything else is
+  shown but does not open.
+- **To show a character that would otherwise be read:** put a backslash before it, as in
+  `\*`, `\#`, `\[`, `\]`, `\{`, `\}`, `\+`, `\=` and `\|`.
+- **A horizontal line and the top of the note.** A note that begins with `---` is read as
+  beginning with front matter when a second `---` line follows. Do not start the body of a
+  note that has no front matter with a horizontal line.
+
+### What you cannot put in a note
+
+- **Photos.** You cannot add one. A person's photo is a line such as
+  `![Tram 28](note.assets/tram.jpg)`, often with `{width=70%}` on the line under it for its
+  width: keep both exactly as they are. A picture from a web address
+  (`![x](https://example.com/a.png)`) is not shown, only its description.
+- **HTML.** It is not read: `<b>x</b>` and `<br>` are shown as typed.
+- **Drawings inside a note, footnotes, mathematics and embedded pages:** there are none. Make a
+  drawing as its own item and give its `url` in the note as a link.
 
 ## Read
 
