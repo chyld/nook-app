@@ -107,9 +107,9 @@
   <div class="cols">
     <div class="list">
       {#each library.versions as v (v.version)}
-        <button type="button" class="row" class:on={picked === v.version} data-testid="history-row" data-version={v.version} onclick={() => pick(v.version)}>
+        <button type="button" class="row" class:on={picked === v.version} data-testid="history-row" data-version={v.version} data-agent={v.agent ?? undefined} onclick={() => pick(v.version)}>
           <span>{new Date(v.time).toLocaleString()}</span>
-          <span class="size">{v.size} bytes</span>
+          <span class="size">{v.size} bytes{#if v.agent} · written by {v.agent}{/if}</span>
         </button>
       {/each}
     </div>

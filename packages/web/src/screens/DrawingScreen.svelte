@@ -272,6 +272,7 @@
     </div>
     <div class="row2">
       <span class="status {editor.saveState}" data-testid="save-status" data-state={editor.saveState}>{statusLabel}</span>
+      {#if editor.entry?.agent}<span class="by" data-testid="written-by" title="An agent wrote this text. It stays marked until you save a change.">Written by {editor.entry.agent}</span>{/if}
       <Button small variant="primary" data-testid="save" title="Save (Ctrl+S)" disabled={!ready || !!editor.loadError} onclick={save}><Icon name="save" size={16} /> Save</Button>
       <Button small data-testid="note-history" onclick={() => router.go(`/d/${id}/history`)}><Icon name="history" size={16} /> History</Button>
       <Button small variant="quiet" data-testid="note-trash" onclick={toTrash}><Icon name="trash" size={16} /> Move to trash</Button>
@@ -410,6 +411,18 @@
     font-size: var(--text-xs);
     color: var(--ink-soft);
     padding: 0 var(--s-2);
+  }
+  .by {
+    max-width: 14rem;
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    background: var(--tag-0-soft);
+    color: var(--tag-0);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .status.dirty {
     color: var(--c-orange);

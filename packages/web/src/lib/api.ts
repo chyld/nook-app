@@ -94,6 +94,10 @@ export interface ApiClient {
   fonts(): Promise<Answer<"fonts">>;
   fontAdd(slug: string): Promise<Answer<"fontAdd">>;
   fontRemove(slug: string): Promise<Answer<"fontRemove">>;
+  /** Agents' tokens (SPEC-AGENTS 2.2). */
+  agents(): Promise<Answer<"agents">>;
+  agentMake(name: string): Promise<Answer<"agentMake">>;
+  agentRevoke(id: string): Promise<unknown>;
 }
 
 export const httpClient: ApiClient = {
@@ -125,6 +129,9 @@ export const httpClient: ApiClient = {
   fonts: () => call("fonts"),
   fontAdd: (slug) => call("fontAdd", { json: { slug } }),
   fontRemove: (slug) => call("fontRemove", { params: { slug } }),
+  agents: () => call("agents"),
+  agentMake: (name) => call("agentMake", { json: { name } }),
+  agentRevoke: (id) => call("agentRevoke", { params: { id } }),
 };
 
 let current: ApiClient = httpClient;

@@ -21,6 +21,8 @@
     save: "M5 5h11l3 3v11H5zM8 5v5h7V5M8 19v-5h8v5",
     note: "M7 4h8l4 4v12H7zM10 12h6M10 16h6",
     pen: "M4 20l4.5-1L19 8.5 15.5 5 5 15.5zM13.5 7l3.5 3.5",
+    // A small robot head: something an agent wrote (SPEC-AGENTS 4.1).
+    agent: "M12 4v3M6 7h12v11H6zM3 11v4M21 11v4M9.5 11.5v1.5M14.5 11.5v1.5M10 15.5h4",
     check: "M5 12l5 5 9-10",
     warn: "M12 4l9 16H3zM12 10v4M12 17v.5",
   };

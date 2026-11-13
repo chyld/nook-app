@@ -16,6 +16,8 @@ export class FakeApi {
   /** Saves wait for this before they answer, when set. */
   gate: Promise<void> | null = null;
   next = 1;
+  /** A person's agents (SPEC-AGENTS 2.2). */
+  agents: { id: string; name: string; created: string; used: string | null }[] = [];
 
   entry(id: string): Entry {
     return { id, kind: this.notes.get(id)?.kind ?? "note", title: "T", tags: [], created: null, modified: Date.now(), size: this.notes.get(id)?.text.length ?? 0, agent: null };
@@ -73,6 +75,23 @@ export class FakeApi {
       fonts: async () => ({ fonts: [] }),
       fontAdd: nope,
       fontRemove: nope,
+      // SPEC-AGENTS 2.2, as the server answers.
+      agents: async () => ({ agents: this.agents.map((a) => ({ ...a })) }),
+      agentMake: async (name) => {
+        const clean = name.trim();
+        if (clean === "" || [...clean].length > 40) throw new ApiError(400, "bad-name", "An agent's name is 1 to 40 characters, without control characters.");
+        if (this.agents.some((a) => a.name.toLowerCase() === clean.toLowerCase())) throw new ApiError(409, "name-taken", "You already have an agent with this name.");
+        if (this.agents.length >= 20) throw new ApiError(409, "limit", "You may have at most 20 agents. Revoke one first.");
+        const n = this.agents.length + 1;
+        const agent = { id: String(n).padStart(16, "a").replace(/[^a-z2-7]/g, "b"), name: clean, created: "2026-11-12T10:00:00.000Z", used: null };
+        this.agents.push(agent);
+        return { agent: { ...agent }, token: "nook_" + String(n).padStart(40, "a").replace(/[^a-z2-7]/g, "b") };
+      },
+      agentRevoke: async (id) => {
+        if (!this.agents.some((a) => a.id === id)) throw new ApiError(404, "not-found", "There is no such agent.");
+        this.agents = this.agents.filter((a) => a.id !== id);
+        return {};
+      },
     };
   }
 }

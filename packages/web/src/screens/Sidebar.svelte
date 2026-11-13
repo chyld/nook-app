@@ -65,10 +65,11 @@
   {/if}
   <nav class="list" aria-label="Your notes">
     {#each library.entries as e (e.id)}
-      <a class="row" class:open={e.id === openId} href={itemPath(e.kind, e.id)} data-testid="note-row" data-id={e.id} data-kind={e.kind} aria-current={e.id === openId ? "page" : undefined} onclick={(ev) => pick(e.kind, e.id, ev)}>
+      <a class="row" class:open={e.id === openId} href={itemPath(e.kind, e.id)} data-testid="note-row" data-id={e.id} data-kind={e.kind} data-agent={e.agent ?? undefined} aria-current={e.id === openId ? "page" : undefined} onclick={(ev) => pick(e.kind, e.id, ev)}>
         <span class="title">{#if e.kind === "drawing"}<span class="pen" title="A drawing"><Icon name="pen" size={14} label="Drawing" /></span>{/if}{e.title}</span>
         <span class="meta">
           <span class="time">{when(e.modified)}</span>
+          {#if e.agent}<span class="agent" data-testid="agent-mark" title="Written by {e.agent}"><Icon name="agent" size={14} label="Written by {e.agent}" /></span>{/if}
           {#if e.problem}<span class="warn" title={e.problem === "broken" ? "The front matter does not parse" : "Cannot be opened"}><Icon name="warn" size={14} /></span>{/if}
           {#each e.tags.slice(0, 3) as t (t)}<Chip hue={tagHue(t)}>{t}</Chip>{/each}
         </span>
@@ -125,6 +126,10 @@
     vertical-align: -0.125em;
     margin-right: var(--s-1);
     color: var(--c-sky);
+  }
+  .agent {
+    display: inline-flex;
+    color: var(--tag-0);
   }
   .search {
     display: flex;

@@ -353,6 +353,7 @@
     </div>
     <div class="row2">
       <span class="status {editor.saveState}" data-testid="save-status" data-state={editor.saveState}>{statusLabel}</span>
+      {#if editor.entry?.agent}<span class="by" data-testid="written-by" title="An agent wrote this text. It stays marked until you save a change.">Written by {editor.entry.agent}</span>{/if}
       <Button small keepFocus data-testid="mode-toggle" title={`Now ${editor.mode === "rich" ? "Rich" : "Raw"}; switch to ${editor.mode === "rich" ? "Raw" : "Rich"}`} onclick={() => setMode(editor.mode === "rich" ? "raw" : "rich")}>{editor.mode === "rich" ? "Rich" : "Raw"}</Button>
       <Button small variant="icon" data-testid="note-settings" aria-label="Note settings" title="Note settings" pressed={settingsOpen} onclick={() => (settingsOpen = !settingsOpen)}><Icon name="settings" /></Button>
       <Button small variant="icon" aria-label="New note" title="New note" onclick={makeNote}><Icon name="plus" /></Button>
@@ -546,6 +547,18 @@
     font-size: var(--text-xs);
     color: var(--ink-soft);
     padding: 0 var(--s-2);
+  }
+  .by {
+    max-width: 14rem;
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    background: var(--tag-0-soft);
+    color: var(--tag-0);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .status.dirty {
     color: var(--c-orange);
