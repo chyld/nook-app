@@ -4,7 +4,7 @@
 // own: the edit stays in its region (region.ts).
 
 import { applyStyle, stepSize, type Change, type Result as StyleResult } from "./style/apply.ts";
-import { blockStyleAt, insertBlock, listKindAt, setBlockStyle, toggleList, touchedBlocks, type BlockResult, type BlockTarget } from "./style/blocks.ts";
+import { blockStyleAt, insertBlock, listKindAt, seen, setBlockStyle, toggleList, touchedBlocks, type BlockResult, type BlockTarget } from "./style/blocks.ts";
 import { cellChars, cellMarkdown, shownLength, styleCellText } from "./style/cells.ts";
 import { buildModel, type Model } from "./style/model.ts";
 import { addColumn, addRow, parseTable, removeColumn, removeRow, replaceTable, type Grid } from "./style/tables.ts";
@@ -176,6 +176,82 @@ const START: Record<BlockTarget, [string, string]> = {
   quote: ["> ", ""], code: ["```\n", "\n```"],
 };
 
+const LOOK = ["color", "bg", "font", "size", "underline"] as const;
+const sameLook = (k: (typeof LOOK)[number], a: Model["chars"][number]["style"], b: Model["chars"][number]["style"]) => (k === "size" ? Math.abs(a.size - b.size) < 0.01 : a[k] === b[k]);
+
+/**
+ * A quote and a list item have no attribute line (the note format): a paragraph whose style is
+ * one cannot become either as it is. So, when the change is refused: the attribute lines of the
+ * touched paragraphs are taken off, the change is made, and every character is given its look
+ * again, which `applyStyle` writes there as spans. The visible text and each character's style
+ * are the same after as before, or the first refusal stands.
+ */
+function keepingStyle(text: string, from: number, to: number, change: (t: string, f: number, z: number) => BlockResult): BlockResult {
+  const first = change(text, from, to);
+  if (first.ok) return first;
+  const old = buildModel(text);
+  const cuts: [number, number][] = [];
+  for (const b of touchedBlocks(old, from, to)) {
+    const attrs = (b.block as { attributes?: { target: string; range: { start: number; end: number } } } | null)?.attributes;
+    const a = attrs?.range;
+    const r = b.info.range;
+    // Only a paragraph's own style: an image's attribute line (its width) is not a look that spans can carry.
+    if (b.info.kind !== "paragraph" || !a || attrs?.target !== "paragraph" || a.start <= r.start || a.start > r.end) continue;
+    // From the end of the paragraph's last line of text to the end of the attribute line.
+    let s = a.start;
+    while (s > r.start && (text[s - 1] === " " || text[s - 1] === "\t")) s--;
+    if (text[s - 1] === "\n") s--;
+    if (text[s - 1] === "\r") s--;
+    cuts.push([s, a.end]);
+  }
+  if (!cuts.length) return first;
+  let bare = text;
+  const at = (p: number) => cuts.reduce((q, [s, e]) => (p >= e ? q - (e - s) : p > s ? q - (p - s) : q), p);
+  for (const [s, e] of [...cuts].reverse()) bare = bare.slice(0, s) + bare.slice(e);
+  const made = change(bare, at(from), at(to));
+  if (!made.ok) return first;
+  let cur = made.text;
+  let now = buildModel(cur);
+  for (let guard = 0; guard < 400; guard++) {
+    if (now.chars.length !== old.chars.length) return first;
+    // The first run of characters of one block that lost one part of their look, all to the same value.
+    let i = -1;
+    let key: (typeof LOOK)[number] = "color";
+    for (let k = 0; k < old.chars.length && i < 0; k++) {
+      const lost = LOOK.find((p) => !sameLook(p, old.chars[k].style, now.chars[k].style));
+      if (lost) [i, key] = [k, lost];
+    }
+    if (i < 0) break;
+    let j = i;
+    while (j + 1 < old.chars.length && old.chars[j + 1].block === old.chars[i].block && sameLook(key, old.chars[j + 1].style, old.chars[i].style) && !sameLook(key, old.chars[j + 1].style, now.chars[j + 1].style)) j++;
+    const want = old.chars[i].style;
+    const c: Change = key === "size" ? { kind: "size", pt: Math.round(want.size * 10) / 10 } : key === "underline" ? { kind: "underline", on: want.underline } : { kind: key, value: want[key] };
+    const next = applyStyle(cur, now.chars[i].start, now.chars[j].end, c);
+    if (!next.ok || next.text === cur) return first;
+    cur = next.text;
+    now = buildModel(cur);
+  }
+  const same = old.chars.every((c, k) => {
+    const n = now.chars[k];
+    return n.ch === c.ch && LOOK.every((p) => sameLook(p, c.style, n.style)) && n.style.bold === c.style.bold && n.style.italic === c.style.italic && n.style.strike === c.style.strike && n.style.code === c.style.code && n.style.link === c.style.link && n.kind === c.kind && (n.image?.width ?? null) === (c.image?.width ?? null) && n.image?.destination === c.image?.destination;
+  });
+  if (!same || !now.chars.length) return first;
+  // The selection stays on the same visible characters; a caret after the character it was after.
+  // (Only the characters the person sees: not the line that ends a code block's last line.)
+  const shown = new Set(seen(old));
+  const inside = old.chars.map((c, k) => (shown.has(c) && c.start >= from && c.end <= to ? k : -1)).filter((k) => k >= 0);
+  if (from !== to && inside.length) return { ok: true, text: cur, from: now.chars[inside[0]].start, to: now.chars[inside[inside.length - 1]].end };
+  // A caret: after the visible character it is after, in its own block; at the block's start, before its first one.
+  const mine = (k: number) => touchedBlocks(old, from, to).some((b) => k >= b.va && k < b.vb);
+  const after = old.chars.findIndex((c) => c.start >= from);
+  let before = -1;
+  old.chars.forEach((c, k) => {
+    if (c.end <= from) before = k;
+  });
+  const p = before >= 0 && mine(before) ? now.chars[before].end : after >= 0 ? now.chars[after].start : now.chars[now.chars.length - 1].end;
+  return { ok: true, text: cur, from: p, to: p };
+}
+
 /** Version 1's `change()`: whatever the block had goes first, then the new style. */
 function changeBlock(t: string, f: number, to: number, kind: BlockTarget): BlockResult {
   if (blockStyleAt(t, f, to) === kind) return { ok: true, text: t, from: f, to };
@@ -185,7 +261,8 @@ function changeBlock(t: string, f: number, to: number, kind: BlockTarget): Block
     if (!next.ok || next.text === r.text) break;
     r = next;
   }
-  return r.ok && kind !== "paragraph" ? setBlockStyle(r.text, r.from, r.to, kind) : r;
+  if (!r.ok || kind === "paragraph") return r;
+  return kind === "quote" ? keepingStyle(r.text, r.from, r.to, (x, a, z) => setBlockStyle(x, a, z, kind)) : setBlockStyle(r.text, r.from, r.to, kind);
 }
 
 function writeStart(text: string, p: number, kind: BlockTarget): Out {
@@ -277,7 +354,7 @@ function listOn(text: string, sel: Sel, kind: Exclude<ListKind, "none">): Step {
     const at = line.from + pre.length + mark.length;
     return { text: text.slice(0, line.from) + pre + mark + post + text.slice(line.to), sel: caret(at) };
   }
-  return fromRange(toggleList(text, from, to, kind), sel.anchor > sel.head);
+  return fromRange(keepingStyle(text, from, to, (x, a, z) => toggleList(x, a, z, kind)), sel.anchor > sel.head);
 }
 
 function setList(doc: Doc, kind: ListKind): Step {
@@ -286,8 +363,13 @@ function setList(doc: Doc, kind: ListKind): Step {
   const now = listAt(doc.text, from, to);
   // Intents set a value; `toggleList` toggles (7.3).
   if (kind === now) return { text: doc.text, sel: doc.sel };
-  if (kind === "none") return listOn(doc.text, doc.sel, now as Exclude<ListKind, "none">);
-  return listOn(doc.text, doc.sel, kind);
+  const out = listOn(doc.text, doc.sel, kind === "none" ? (now as Exclude<ListKind, "none">) : kind);
+  // A style waiting at the caret is for what is typed next, in the item or out of it (as `setBlock`).
+  if (from === to && isOut(out) && doc.typing.marks.length) {
+    const size = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
+    out.typing = { marks: doc.typing.marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: size, own: true } : c)), block: null };
+  }
+  return out;
 }
 
 // --- styles -----------------------------------------------------------------------------------
@@ -377,7 +459,8 @@ function insertText(doc: Doc, ins: string): Step {
   const kind = doc.typing.block;
   let refused = "";
   if (r.ok && kind && kind !== "paragraph" && !isBlank(ins)) {
-    const b = setBlockStyle(r.text, r.cursor, r.cursor, kind);
+    const at = r.cursor;
+    const b = kind === "quote" ? keepingStyle(r.text, at, at, (x, a, z) => setBlockStyle(x, a, z, kind)) : setBlockStyle(r.text, at, at, kind);
     // In a new code block the caret belongs after the text, not on the closing fence's line.
     const onFence = b.ok && kind === "code" && b.text[b.from - 1] === "\n" && b.text[b.from] === "`";
     if (b.ok) r = { ok: true, text: b.text, cursor: onFence ? b.from - 1 : b.from };

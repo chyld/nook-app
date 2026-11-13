@@ -241,7 +241,7 @@ test("7.6 block styles exclude each other (7.2 new)", () => {
     ["## Text¦", { type: "setBlock", kind: "quote" }, "> Text¦", "the heading goes first"],
     ["> ## Text¦", { type: "setBlock", kind: "h1" }, "# Text¦", "quote and heading both go first"],
     ["## Text¦", { type: "setBlock", kind: "paragraph" }, "Text¦"],
-    ["Text¦", { type: "setBlock", kind: "code" }, "```\nText\n¦```"],
+    ["Text¦", { type: "setBlock", kind: "code" }, "```\nText¦\n```", "the caret stays after the text, not on the closing fence's line"],
     ["```\nco¦de\n```", { type: "setBlock", kind: "h2" }, "## co¦de", "inside a code block, another style converts it"],
     ["```\nco¦de\n```", { type: "setBlock", kind: "paragraph" }, "co¦de"],
     ["```\ncode\n¦\n```", { type: "setBlock", kind: "quote" }, "```\ncode\n```\n\n¦", "on its empty line: leaveCode"],

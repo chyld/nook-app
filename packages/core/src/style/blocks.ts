@@ -33,8 +33,9 @@ function attrEnd(b: BlockModel): number {
  *  paragraph's range holds that line, and it is not one of the paragraph's lines of text. */
 function bodyOf(text: string, b: BlockModel): string {
   const r = b.info.range;
-  const pb = b.block as { attributes?: { range: { start: number; end: number } } } | null;
-  const a = pb && "attributes" in pb && pb.attributes ? pb.attributes.range : null;
+  const pb = b.block as { attributes?: { target: string; range: { start: number; end: number } } } | null;
+  // An image's attribute line (its width) is not a paragraph's style: a heading would not keep it.
+  const a = pb && "attributes" in pb && pb.attributes && pb.attributes.target === "paragraph" ? pb.attributes.range : null;
   if (!a || a.start <= r.start || a.start > r.end) return text.slice(r.start, r.end);
   return text.slice(r.start, a.start).replace(/(\r\n|\r|\n)[ \t]*$/, "");
 }
@@ -85,16 +86,17 @@ function lineStarts(text: string, start: number, end: number): number[] {
   return out;
 }
 
+/** The characters the person sees. Breaks of any kind count as line breaks; the line ending a
+ *  code block's last line is not one of them. */
+export const seen = (mm: Model) =>
+  mm.chars.filter((c, i) => !(mm.runs.blocks[c.block].kind === "code" && c.ch === "\n" && (i + 1 === mm.chars.length || mm.chars[i + 1].block !== c.block)));
+
 /** The check of block commands: same visible characters and inline styles, local edit. */
 function checkBlocks(old: Model, newText: string, touched: BlockModel[], ignore: (keyof RunStyle)[]): string | null {
   if (newText === old.text) return "nothing changed";
   const nm = buildModel(newText);
-  // Breaks of any kind count as line breaks; the line ending a code block's last line is not
-  // a character the person sees.
-  const visible = (mm: Model) =>
-    mm.chars.filter((c, i) => !(mm.runs.blocks[c.block].kind === "code" && c.ch === "\n" && (i + 1 === mm.chars.length || mm.chars[i + 1].block !== c.block)));
-  const oc = visible(old);
-  const nc = visible(nm);
+  const oc = seen(old);
+  const nc = seen(nm);
   const norm = (c: { ch: string; kind: string }) => (c.kind === "soft" || c.kind === "hard" ? "\n" : c.ch);
   if (oc.map(norm).join("") !== nc.map(norm).join("")) return "the visible text would change";
   const strip = (s: RunStyle): RunStyle => {
@@ -120,21 +122,26 @@ function checkBlocks(old: Model, newText: string, touched: BlockModel[], ignore:
 function result(old: Model, t: string, touched: BlockModel[], ignore: (keyof RunStyle)[], from: number, to: number): BlockResult {
   const r = checkBlocks(old, t, touched, ignore);
   if (r !== null) return { ok: false, reason: r };
-  // Keep the selection on the same visible characters.
+  // Keep the selection on the same visible characters (those of `seen`, which a change to or
+  // from a code block does not renumber).
   const nm = buildModel(t);
-  const sel = old.chars.map((c, i) => (c.start >= from && c.end <= to ? i : -1)).filter((i) => i >= 0);
-  if (sel.length === 0) {
-    // A cursor: kept before the same visible character.
-    const k = old.chars.findIndex((c) => c.start >= from);
-    const pos = k >= 0 && k < nm.chars.length ? nm.chars[k].start : nm.chars.length ? nm.chars[nm.chars.length - 1].end : Math.min(from, t.length);
-    void r0Of;
+  const oc = seen(old);
+  const nc = seen(nm);
+  const sel = oc.map((c, i) => (c.start >= from && c.end <= to ? i : -1)).filter((i) => i >= 0);
+  if (sel.length === 0 || nc.length !== oc.length) {
+    // A cursor: kept after the visible character it is after, in its own block; at the block's
+    // start, before its first one. (Before the next block's first character was the old rule
+    // at a block's end, which put the caret in the block below.)
+    const own = (i: number) => i >= 0 && i < nc.length && touched.some((b) => old.chars[b.va] !== undefined && oc[i].start >= old.chars[b.va].start && oc[i].end <= old.chars[b.vb - 1].end);
+    const k = oc.findIndex((c) => c.start >= from);
+    let last = -1;
+    oc.forEach((c, i) => {
+      if (c.end <= from) last = i;
+    });
+    const pos = own(last) ? nc[last].end : k >= 0 && k < nc.length ? nc[k].start : nc.length ? nc[nc.length - 1].end : Math.min(from, t.length);
     return { ok: true, text: t, from: pos, to: pos };
   }
-  return { ok: true, text: t, from: nm.chars[sel[0]].start, to: nm.chars[sel[sel.length - 1]].end };
-}
-
-function r0Of(touched: BlockModel[]): number {
-  return Math.min(...touched.map((b) => b.info.range.start));
+  return { ok: true, text: t, from: nc[sel[0]].start, to: nc[sel[sel.length - 1]].end };
 }
 
 /** Block style: normal text, Heading 1 to 4, Quote or Code block (EDITOR-PLAN 3.3). */

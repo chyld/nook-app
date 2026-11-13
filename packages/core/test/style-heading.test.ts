@@ -81,10 +81,77 @@ test("a saved style with no size leaves a heading its size", () => {
 });
 
 test("a block the first letter cannot start is said, not dropped in silence", () => {
-  const r = steps("¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "quote" }, type("h")]);
+  const r = steps("¦", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "code" }, type("h")]);
   assert.equal(r.out, "h¦\n{color=red}");
   assert.equal(r.skipped.length, 1);
-  assert.match(r.skipped[0]!, /^Quote was not applied with this style: /);
+  assert.match(r.skipped[0]!, /^Code block was not applied with this style: /);
+});
+
+const ALL = style({ bold: true, italic: true, underline: true, strike: true, size: 20, font: "serif", color: "red", bg: "yellow" });
+const one = (marked: string, intents: Intent[]) => {
+  const r = steps(marked, intents);
+  assert.deepEqual(r.skipped, [], marked);
+  return r.out;
+};
+const Q: Intent = { type: "setBlock", kind: "quote" };
+const list = (kind: "bullet" | "ordered" | "task" | "none"): Intent => ({ type: "setList", kind });
+
+test("a paragraph whose style is an attribute line becomes a quote: the style goes into spans", () => {
+  assert.equal(one("hel¦lo\n{color=red}", [Q]), "> [hel¦lo]{color=red}");
+  assert.equal(one("**hel¦lo**\n{size=20pt color=red}", [Q]), "> [**hel¦lo**]{color=red size=20pt}");
+  assert.equal(one("hel¦lo\n{color=red}", [Q, { type: "setBlock", kind: "paragraph" }]), "[hel¦lo]{color=red}", "and back to a paragraph");
+  // What the paragraph already had inside it is kept: a span of its own, a colour over the block's, a link.
+  assert.equal(one("left [mid¦]{bg=yellow} right\n{color=red}", [Q]), "> [left ]{color=red}[mid¦]{bg=yellow color=red}[ right]{color=red}");
+  assert.equal(one("left [mid¦]{color=blue} right\n{color=red}", [Q]), "> [left ]{color=red}[mid¦]{color=blue}[ right]{color=red}");
+  assert.equal(one("see [th¦is](https://example.com) now\n{color=red}", [Q]), "> [see [th¦is](https://example.com) now]{color=red}");
+  // Several paragraphs, several lines, and text on either side that does not change.
+  assert.equal(one("«one\n{color=red}\n\ntwo\n{color=blue}»", [Q]), "> [«one]{color=red}\n\n> [two»]{color=blue}");
+  assert.equal(one("one\ntw¦o\n{color=red}", [Q]), "> [one\n> tw¦o]{color=red}");
+  assert.equal(one("before\n\nhel¦lo\n{color=red}\n\nafter", [Q]), "before\n\n> [hel¦lo]{color=red}\n\nafter");
+  // Every property a saved style has.
+  assert.equal(one("«hello»", [{ type: "applyStyle", style: ALL }, Q]), "> [~~***«hello»***~~]{color=red bg=yellow font=serif size=20pt underline=yes}");
+});
+
+test("a paragraph whose style is an attribute line becomes a list item, of each kind", () => {
+  assert.equal(one("hel¦lo\n{color=red}", [list("bullet")]), "- [hel¦lo]{color=red}");
+  assert.equal(one("hel¦lo\n{color=red}", [list("ordered")]), "1. [hel¦lo]{color=red}");
+  assert.equal(one("hel¦lo\n{color=red}", [list("task")]), "- [ ] [hel¦lo]{color=red}");
+  assert.equal(one("hel¦lo\n{color=red}", [list("bullet"), list("none")]), "[hel¦lo]{color=red}", "and off again");
+  assert.equal(one("«one\n{color=red}\n\ntwo\n{color=blue}»", [list("bullet")]), "- [«one]{color=red}\n- [two»]{color=blue}");
+  assert.equal(one("hello¦\n{color=red}", [list("bullet"), type("!")]), "- [hello!¦]{color=red}");
+  // A selection that ends with a code block ends at the code's last character, not in its closing fence.
+  assert.equal(one("«one\n{color=red}\n\n```\ncode\n```»", [list("bullet")]), "- [«one]{color=red}\n\n```\ncode»\n```");
+});
+
+test("an empty line: a saved style with a quote or a list, in either order, then typing", () => {
+  assert.equal(one("¦", [{ type: "applyStyle", style: RED }, Q, type("h"), type("i")]), "> [hi¦]{color=red}");
+  assert.equal(one("¦", [Q, { type: "applyStyle", style: BIG }, type("h"), type("i")]), "> [**hi¦**]{color=red size=20pt}");
+  assert.equal(one("¦\n\nafter", [{ type: "applyStyle", style: BIG }, Q, type("h"), type("i")]), "> [**hi¦**]{color=red size=20pt}\n\nafter");
+  for (const [kind, mark] of [["bullet", "- "], ["ordered", "1. "], ["task", "- [ ] "]] as const) {
+    assert.equal(one("¦", [{ type: "applyStyle", style: BIG }, list(kind), type("h"), type("i")]), `${mark}[**hi¦**]{size=20pt color=red}`, `style, then ${kind}`);
+    assert.equal(one("¦", [list(kind), { type: "applyStyle", style: BIG }, type("h"), type("i")]), `${mark}[**hi¦**]{size=20pt color=red}`, `${kind}, then style`);
+    assert.equal(one("¦", [{ type: "applyStyle", style: RED }, list(kind), type("h"), type("i")]), `${mark}[hi¦]{color=red}`, `a style with no size, then ${kind}`);
+  }
+});
+
+test("after a block change the caret stays in its block, with other text below", () => {
+  assert.equal(one("hello¦\n\nafter", [{ type: "setBlock", kind: "h3" }]), "### hello¦\n\nafter");
+  assert.equal(one("**hello**¦\n\nafter", [{ type: "setBlock", kind: "h3" }]), "### **hello¦**\n\nafter");
+  assert.equal(one("¦\n\nafter", [{ type: "setBlock", kind: "h3" }, type("h"), type("i")]), "### hi¦\n\nafter");
+  assert.equal(one("¦\n\nafter", [{ type: "applyStyle", style: RED }, { type: "setBlock", kind: "h3" }, type("h"), type("i")]), "### hi¦\n{color=red}\n\nafter");
+  assert.equal(one("hello¦\n\nafter", [Q]), "> hello¦\n\nafter");
+  // Out of a code block, and on to another block by way of a paragraph.
+  assert.equal(one("```\nhello¦\n```\n\nafter", [{ type: "setBlock", kind: "paragraph" }]), "hello¦\n\nafter");
+  assert.equal(one("```\nhello¦\n```\n\nafter", [{ type: "setBlock", kind: "h2" }]), "## hello¦\n\nafter");
+  assert.equal(one("```\n¦hello\n```\n\nafter", [{ type: "setBlock", kind: "quote" }]), "> ¦hello\n\nafter");
+  assert.equal(one("before\n\nhello¦\n\nafter", [{ type: "setBlock", kind: "code" }]), "before\n\n```\nhello¦\n```\n\nafter");
+  assert.equal(one("before\n\n¦hello\n\nafter", [{ type: "setBlock", kind: "h3" }]), "before\n\n### ¦hello\n\nafter");
+  // A styled paragraph made a quote or a list: at its start, in it and at its end, between other text.
+  for (const [intent, mark] of [[Q, "> "], [list("bullet"), "- "], [list("ordered"), "1. "], [list("task"), "- [ ] "]] as const) {
+    assert.equal(one("before\n\n¦hello\n{color=red}\n\nafter", [intent]), `before\n\n${mark}[¦hello]{color=red}\n\nafter`, `start, ${mark}`);
+    assert.equal(one("before\n\nhel¦lo\n{color=red}\n\nafter", [intent]), `before\n\n${mark}[hel¦lo]{color=red}\n\nafter`, `middle, ${mark}`);
+    assert.equal(one("before\n\nhello¦\n{color=red}\n\nafter", [intent]), `before\n\n${mark}[hello¦]{color=red}\n\nafter`, `end, ${mark}`);
+  }
 });
 
 test("a style waiting at the caret is kept when the line becomes a heading", () => {
@@ -114,4 +181,11 @@ test("the size shown for a waiting style with no size is the waiting heading's",
   }
   const big = steps("¦", [{ type: "applyStyle", style: BIG }, { type: "setBlock", kind: "h3" }]).doc;
   assert.equal(shownSize(buildModel(big.text), big.sel.head, big.typing), 20);
+});
+
+test("an image's width line is not taken for a style: the change is refused, as before", () => {
+  for (const intent of [Q, list("bullet"), { type: "setBlock", kind: "h3" }] as Intent[]) {
+    const r = run("![a](x.png)¦\n{width=50%}", intent);
+    assert.ok("refused" in r, `${JSON.stringify(intent)}: ${"out" in r ? r.out : ""}`);
+  }
 });

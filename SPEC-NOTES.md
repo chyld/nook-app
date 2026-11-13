@@ -597,6 +597,30 @@ line of source. What changed, in `core`:
   box shows the heading's size for such a style. Nothing is
   left waiting when the line becomes a code block.
 
-Not changed: a paragraph with an attribute line still does not become a quote or a list (the
-format has no attribute line there), and a list chosen after a style on an empty line still
-clears the waiting style.
+Not changed: a selection over blocks of several kinds still gets the note's size from a style
+that names none; and a code block takes no style, so one chosen with a style on an empty line
+is refused with the message above.
+
+## A saved style with a quote or a list (2026-11-13)
+
+The note format has no attribute line in a quote or a list item, so a paragraph whose style
+is one was refused as either ("the visible text would change"), and on an empty line the
+quote was dropped. What changed, in `core`:
+
+- **The style goes into spans** (`keepingStyle` in `reduce.ts`). When a quote or a list is
+  refused for paragraphs with attribute lines, those lines are taken off, the change is made,
+  and each character is given its colour, highlight, font, size and underline again by
+  `applyStyle`, which writes spans there: `hello` with `{color=red}` under it becomes
+  `> [hello]{color=red}`. It is accepted only when the visible text and every character's
+  style are the same after as before; otherwise the first refusal stands. Back out of the
+  quote or the list, the spans stay spans.
+- **A list chosen on an empty line keeps a waiting style** (`setList`), as a change of block
+  does: a style and then a list, or a list and then a style, both style what is typed.
+- **After a change of block the caret stays in its block.** With the caret at the end of a
+  block that had another under it, it was put at the start of that next block: text typed
+  after choosing a heading on an empty line above other text went into the paragraph below.
+  It is kept after the visible character it is after (`result` in `blocks.ts`, which now
+  counts only the characters the person sees, so leaving a code block is right too). In a
+  new code block that is after the text, not on the closing fence's line.
+- **An image's width line is not a style.** A paragraph that is only an image, with
+  `{width=...}` under it, is refused as a quote, a list item or a heading, as before.
