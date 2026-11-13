@@ -8,8 +8,8 @@
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
-import { KIND_LIMITS, MB, makeVersion, newNoteId, randomBase32, RE, type Entry, type HistoryEntry, type Kind, type TrashEntry } from "../../contract/src/index.ts";
-import { cleanTitle, decodeUtf8, drawingFacts, drawingProblem, emptyDrawing, hasBrokenFrontMatter, noteTitle, parseDrawing, plainSpaces, usedFileIds } from "../../core/src/index.ts";
+import { KIND_LIMITS, MB, makeVersion, newNoteId, randomBase32, RE, UNNAMED_AGENT, type Entry, type HistoryEntry, type Kind, type TrashEntry } from "../../contract/src/index.ts";
+import { appendToNote, cleanTitle, decodeUtf8, drawingFacts, drawingProblem, droppedImage, emptyDrawing, hasBrokenFrontMatter, hasFrontMatter, liveElements, newNoteText, noteIsBlank, noteTitle, parseDrawing, plainSpaces, usedFileIds, withFrontMatter, withNook, yamlQuote } from "../../core/src/index.ts";
 import { parseNote } from "../../../noteformat/src/index.ts";
 import { HttpError } from "./errors.ts";
 import { createFile, emptyDir, ensureDir, errCode, fsyncDir, isNotFound, readRegular, replaceFile, revisionOf, step } from "./fsutil.ts";
@@ -30,6 +30,8 @@ interface Indexed {
    *  elements (SPEC-DRAWINGS 4.6), never its bytes. */
   text: string | null;
   broken: boolean;
+  /** The agent whose request wrote the main file as it is, or null (SPEC-AGENTS 4.1). */
+  agent: string | null;
 }
 
 export interface NoteDoc {
@@ -45,15 +47,38 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** A YAML double-quoted string, with `\` and `"` escaped (4.3). */
-export function yamlQuote(s: string): string {
-  return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+// 4.3: the text of a new note is made in `core` (SPEC-AGENTS 7), and still offered from here.
+export { newNoteText, yamlQuote };
+
+/** SPEC-AGENTS 4.2: who wrote the main file and each of the agents' versions. `current` counts
+ *  only while its revision is the main file's. */
+export interface Writers {
+  current: { agent: string; revision: string } | null;
+  versions: Record<string, string>;
 }
 
-/** 4.3: the text of a new note. */
-export function newNoteText(title: string, created: string): string {
-  return `---\ntitle: ${yamlQuote(title)}\ncreated: ${created}\n---\n\n`;
+/** The writers a file's bytes say, or null when they are not valid (4.2): then everything is a
+ *  person's and no version has a name. */
+export function parseWriters(bytes: Uint8Array | null): Writers | null {
+  if (!bytes) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    return null;
+  }
+  const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+  if (!isObj(v)) return null;
+  const c = v.current;
+  if (c !== null && !(isObj(c) && typeof c.agent === "string" && typeof c.revision === "string" && RE.revision.test(c.revision))) return null;
+  if (!isObj(v.versions) || Object.values(v.versions).some((n) => typeof n !== "string")) return null;
+  // A copy with no prototype surprises: only own, string-valued names.
+  const versions: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const [k, n] of Object.entries(v.versions)) versions[k] = n as string;
+  return { current: c === null ? null : { agent: (c as { agent: string }).agent, revision: (c as { revision: string }).revision }, versions };
 }
+
+const writersBytes = (w: Writers): Buffer => Buffer.from(JSON.stringify({ current: w.current, versions: { ...w.versions } }, null, 2) + "\n");
 
 /** The facts of a note's text for the index (4.2, 4.5). */
 function facts(text: string | null): Pick<Indexed, "title" | "tags" | "created" | "broken"> {
@@ -176,10 +201,35 @@ export class UserSpace {
       this.index.delete(id);
       return null;
     }
-    const e: Indexed = { id, kind, ...factsOf(kind, decodeNote(bytes)), mtimeNs: st.mtimeNs, size: bytes.length };
+    // SPEC-AGENTS 4.2: the writers are read whenever the main file is.
+    const current = (await this.#readWriters(id))?.current ?? null;
+    const agent = current && current.revision === revisionOf(bytes) ? current.agent : null;
+    const e: Indexed = { id, kind, ...factsOf(kind, decodeNote(bytes)), mtimeNs: st.mtimeNs, size: bytes.length, agent };
     // The stat taken before the read says what was read; a write meanwhile is seen next time.
     this.index.set(id, e);
     return e;
+  }
+
+  /** SPEC-AGENTS 4.2: an item's `writers.json`, or null when it is missing or not valid. */
+  async #readWriters(id: string): Promise<Writers | null> {
+    let bytes: Buffer | null;
+    try {
+      bytes = await readRegular(this.notePath(id, "writers.json"));
+    } catch {
+      // Not a file that can be read (a link, a folder): as if it were not there.
+      return null;
+    }
+    return parseWriters(bytes);
+  }
+
+  /** Replaces `writers.json` by rule 3. The index entry goes, so that the item is read again
+   *  with its new writer even when the main file is the same. */
+  async #writeWriters(id: string, w: Writers): Promise<void> {
+    try {
+      await replaceFile(this.layout.tmp, this.notePath(id, "writers.json"), writersBytes(w));
+    } finally {
+      this.index.delete(id);
+    }
   }
 
   /** The folder check at the start of a list or a search. */
@@ -193,7 +243,7 @@ export class UserSpace {
   }
 
   entryOf(e: Indexed): Entry {
-    const out: Entry = { id: e.id, kind: e.kind, title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size };
+    const out: Entry = { id: e.id, kind: e.kind, title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size, agent: e.agent };
     if (e.text === null) out.problem = "unreadable";
     else if (e.broken) out.problem = "broken";
     return out;
@@ -255,17 +305,29 @@ export class UserSpace {
   }
 
   /** Builds a folder in `tmp/` and renames it into `notes/` (4.3, Create). */
-  async #build(text: string, assetsFrom: string | null, kind: Kind = "note"): Promise<string> {
+  async #build(text: string, assetsFrom: string | null, kind: Kind = "note", writer: string | null = null): Promise<string> {
     const id = await this.#newId();
     const build = path.join(this.layout.tmp, `new-${id}-${randomBase32(6)}`);
     await fs.mkdir(build, { mode: 0o700 });
     try {
+      const bytes = Buffer.from(text, "utf8");
       const fh = await fs.open(path.join(build, MAIN_FILE[kind]), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       try {
-        await fh.writeFile(Buffer.from(text, "utf8"));
+        await fh.writeFile(bytes);
         await fh.sync();
       } finally {
         await fh.close();
+      }
+      // SPEC-AGENTS 4.3: an agent's create names its writer before the folder is in place, with
+      // the revision of the bytes written here.
+      if (writer !== null) {
+        const wh = await fs.open(path.join(build, "writers.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+        try {
+          await wh.writeFile(writersBytes({ current: { agent: writer, revision: revisionOf(bytes) }, versions: {} }));
+          await wh.sync();
+        } finally {
+          await wh.close();
+        }
       }
       if (assetsFrom) await this.#copyAssets(assetsFrom, path.join(build, "note.assets"));
       await fsyncDir(build);
@@ -365,9 +427,67 @@ export class UserSpace {
     return { id, ...(await this.read(id)), photosMissing: missing };
   }
 
-  // --- saving (4.4) ------------------------------------------------------------------------------
+  /** SPEC-AGENTS 5.5: an item an agent creates from a document. A note without front matter
+   *  gets it (the title if given, the tags, today's date); a drawing without `nook` gets it
+   *  (`Untitled N` without a title). A document that has its own is stored as sent, and a title
+   *  or tags beside it are refused. The title and tags are already checked. */
+  async agentCreate(bytes: Uint8Array, kind: Kind, title: string | null, tags: readonly string[], writer: string): Promise<NoteDoc & { id: string }> {
+    const text = checkBytes(bytes, kind);
+    const beside = () => new HttpError(400, `This ${what(kind)} has its own ${kind === "note" ? "front matter" : "nook key"}, so a title or tags cannot be given in the address.`, {}, "bad-request", `Put the title and the tags in the document's own ${kind === "note" ? "front matter" : "nook key"}, or send the document without one.`);
+    let out = text;
+    if (kind === "note") {
+      if (hasFrontMatter(text)) {
+        if (title !== null || tags.length) throw beside();
+      } else {
+        out = withFrontMatter(text, title, tags, today());
+      }
+    } else {
+      const doc = parseDrawing(text).doc!;
+      if (Object.prototype.hasOwnProperty.call(doc, "nook")) {
+        if (title !== null || tags.length) throw beside();
+      } else {
+        out = withNook(doc, { title: title ?? (await this.#untitled()), tags, created: today() });
+      }
+    }
+    // The limit and the checks again, on the bytes to be written.
+    if (out !== text) checkBytes(Buffer.from(out, "utf8"), kind);
+    const id = await this.#build(out, null, kind, writer);
+    return { id, ...(await this.read(id)) };
+  }
 
-  async save(id: string, sent: string, bytes: Uint8Array, kind: Kind = "note"): Promise<{ revision: string; entry: Entry }> {
+  // --- saving (4.4; SPEC-AGENTS 4.3) -------------------------------------------------------------
+
+  /** The 409 of a stale revision, with the current document when it can be read. */
+  async #changed(id: string, kind: Kind, old: Uint8Array, current: string): Promise<HttpError> {
+    const text = decodeNote(old);
+    const e = await this.#check(id);
+    return new HttpError(409, `The ${what(kind)} was changed since you opened it.`, text === null || !e ? {} : { current: { text, revision: current, entry: this.entryOf(e) } }, "changed");
+  }
+
+  /** SPEC-AGENTS 3.3: an agent's save may not empty a document or drop an image it has. */
+  #refuseLoss(kind: Kind, old: Uint8Array, next: string): void {
+    const before = decodeNote(old);
+    if (before === null) return;
+    if (kind === "note") {
+      if (!noteIsBlank(before) && noteIsBlank(next)) {
+        throw new HttpError(422, "This save would leave the note empty.", {}, "empty", "An agent cannot empty a note. Send the whole text you want the note to have; to add to it, use append.");
+      }
+      return;
+    }
+    const was = parseDrawing(before).doc;
+    const now = parseDrawing(next).doc;
+    if (!was || !now) return;
+    if (liveElements(was).length > 0 && liveElements(now).length === 0) {
+      throw new HttpError(422, "This save would leave the drawing with no elements.", {}, "empty", "An agent cannot empty a drawing. Read it again and send all of its elements with your change.");
+    }
+    const dropped = droppedImage(now, was);
+    if (dropped !== null) {
+      throw new HttpError(422, `This save would drop the image ${dropped}.`, { file: dropped }, "missing-image", `An element uses the image file "${dropped}", which the drawing has and your "files" does not. Read the drawing again and send its whole "files" back.`);
+    }
+  }
+
+  /** `writer`: the name of the agent saving, or null for a person (SPEC-AGENTS 4.3). */
+  async save(id: string, sent: string, bytes: Uint8Array, kind: Kind = "note", writer: string | null = null): Promise<{ revision: string; entry: Entry }> {
     // 1. Find the note or drawing; a body of the other kind is refused (SPEC-DRAWINGS 5).
     const item = await this.live(id);
     if (item.kind !== kind) throw new HttpError(415, item.kind === "note" ? "This is a note: it is saved as text/markdown." : "This is a drawing: it is saved as an Excalidraw file.");
@@ -378,44 +498,100 @@ export class UserSpace {
     const old = await readRegular(file);
     if (!old) throw notFound();
     const current = revisionOf(old);
-    if (current !== sent) {
-      const text = decodeNote(old);
-      const e = await this.#check(id);
-      throw new HttpError(409, `The ${what(kind)} was changed since you opened it.`, text === null || !e ? {} : { current: { text, revision: current, entry: this.entryOf(e) } }, "changed");
-    }
-    // 3. Check the new bytes.
-    checkBytes(bytes, kind);
-    // 4. Nothing changed: write nothing.
+    if (current !== sent) throw await this.#changed(id, kind, old, current);
+    // 3. Check the new bytes; an agent's may not empty the document or drop an image.
+    const text = checkBytes(bytes, kind);
+    if (writer !== null) this.#refuseLoss(kind, old, text);
+    // 4. Nothing changed: write nothing, and leave the writers as they are.
     if (Buffer.compare(Buffer.from(old), Buffer.from(bytes)) === 0) {
       const e = await this.#check(id);
       return { revision: current, entry: this.entryOf(e!) };
     }
-    // 5. The old bytes go to history as a new file.
+    // Who wrote the old bytes: an agent only while `current` names their revision (4.2).
+    const writers = await this.#readWriters(id);
+    const oldAgent = writers?.current && writers.current.revision === current ? writers.current.agent : null;
+    // 5. The old bytes go to history as a new file: an agent's to `agent-history/`, a person's
+    //    to `history/`, under a name in neither.
     const hist = this.notePath(id, "history");
-    await ensureDir(hist);
+    const agentHist = this.notePath(id, "agent-history");
+    await ensureDir(oldAgent !== null ? agentHist : hist);
+    let version: string;
     for (;;) {
-      const version = makeVersion(new Date());
+      version = makeVersion(new Date());
+      if (await lstatOrNull(this.notePath(id, { version, kind, agent: oldAgent === null }))) continue;
       try {
-        await createFile(this.layout.tmp, this.notePath(id, { version, kind }), old);
+        await createFile(this.layout.tmp, this.notePath(id, { version, kind, agent: oldAgent !== null }), old);
         break;
       } catch (e) {
         if (errCode(e) !== "EEXIST") throw e;
       }
     }
     step("save:history");
+    // 5a. The writers: the new version's name if it is an agent's, and `current` null. The
+    //     revision of the new bytes is written only once they are the main file (7a), so after a
+    //     crash anywhere a person's text is never taken for an agent's.
+    const versions: Record<string, string> = { ...(writers?.versions ?? {}) };
+    if (oldAgent !== null) versions[version] = oldAgent;
+    if (oldAgent !== null || (writers !== null && writers.current !== null)) {
+      try {
+        await this.#writeWriters(id, { current: null, versions });
+      } catch (e) {
+        // A person's save goes on: its file cannot match a stale `current`. An agent's stops.
+        if (writer !== null) throw e;
+        this.log.error(`writers.json could not be written: ${errCode(e) ?? (e as Error).name}`);
+      }
+    }
+    step("save:writers");
     // 6. Replace the note.
     await replaceFile(this.layout.tmp, file, bytes);
     step("save:replaced");
-    // 7. History beyond the newest 50 goes (20 for a drawing).
+    // 7. Old versions go. Any save removes agents' versions beyond the newest 10 (5 for a
+    //    drawing); only a person's save removes a person's, beyond the newest 50 (20).
     const ext = EXT[kind];
-    const versions = (await readdirOrEmpty(hist)).filter((n) => n.endsWith(ext) && RE.version.test(n.slice(0, -ext.length))).sort();
-    const extra = versions.slice(0, Math.max(0, versions.length - KIND_LIMITS[kind].history));
-    for (const n of extra) await fs.rm(path.join(hist, n), { force: true });
-    // Synced, so a crash cannot bring removed versions back (4.4: at worst one extra file).
-    if (extra.length) await fsyncDir(hist);
-    // 8. Answer.
+    const prune = async (dir: string, keep: number): Promise<string[]> => {
+      const found = (await readdirOrEmpty(dir)).filter((n) => n.endsWith(ext) && RE.version.test(n.slice(0, -ext.length))).sort();
+      const extra = found.slice(0, Math.max(0, found.length - keep));
+      for (const n of extra) await fs.rm(path.join(dir, n), { force: true });
+      // Synced, so a crash cannot bring removed versions back (4.4: at worst one extra file).
+      if (extra.length) await fsyncDir(dir);
+      return extra.map((n) => n.slice(0, -ext.length));
+    };
+    const gone = await prune(agentHist, KIND_LIMITS[kind].agentHistory);
+    if (writer === null) await prune(hist, KIND_LIMITS[kind].history);
+    step("save:pruned");
+    // 7a. The writers once more, when something in them changes: an agent's save names itself
+    //     with the revision of the bytes now in place; removed versions lose their names.
+    if (writer !== null || gone.length) {
+      for (const v of gone) delete versions[v];
+      try {
+        await this.#writeWriters(id, { current: writer === null ? null : { agent: writer, revision: revisionOf(bytes) }, versions });
+      } catch (e) {
+        // The save is made; without this the new text counts as a person's.
+        this.log.error(`writers.json could not be written: ${errCode(e) ?? (e as Error).name}`);
+      }
+    }
+    // 8. Answer. The index entry is read again: the same bytes can have a new writer.
+    this.index.delete(id);
     const e = await this.#check(id);
     return { revision: revisionOf(bytes), entry: this.entryOf(e!) };
+  }
+
+  /** SPEC-AGENTS 5.6: adds `body` at the end of a note, in one step under the user's lock.
+   *  `sent`: the revision the agent has, or null to append to whatever the note holds now. */
+  async append(id: string, sent: string | null, body: Uint8Array, writer: string): Promise<{ revision: string; entry: Entry }> {
+    const item = await this.live(id);
+    if (item.kind !== "note") throw new HttpError(415, "Only a note can be appended to.", {}, "unsupported-type", "A drawing is changed by reading it and saving the whole file with PUT.");
+    const added = decodeUtf8(body);
+    if (added === null) throw new HttpError(422, "The text is not valid UTF-8.", {}, "not-utf8");
+    const old = await readRegular(this.notePath(id, "note.md"));
+    if (!old) throw notFound();
+    const current = revisionOf(old);
+    if (sent !== null && sent !== current) throw await this.#changed(id, "note", old, current);
+    const before = decodeNote(old);
+    if (before === null) throw new HttpError(422, "This note is not valid UTF-8 and cannot be added to.", {}, "not-utf8", "A person must mend the file before an agent can change it.");
+    const next = appendToNote(before, added);
+    if (next === null) throw new HttpError(422, "There is nothing to append: the body is empty.", {}, "empty", "Send the text to add as the body, with Content-Type: text/markdown.");
+    return this.save(id, current, Buffer.from(next, "utf8"), "note", writer);
   }
 
   // --- trash (4.3) -------------------------------------------------------------------------------
@@ -518,16 +694,24 @@ export class UserSpace {
   async history(id: string): Promise<HistoryEntry[]> {
     const { kind } = await this.live(id);
     const ext = EXT[kind];
-    const dir = this.notePath(id, "history");
+    // SPEC-AGENTS 4.2, 4.3: a person's versions and the agents', together. An agent's version
+    // has its writer's name, or "an agent" when the name is not recorded.
+    const names = (await this.#readWriters(id))?.versions ?? {};
     const out: HistoryEntry[] = [];
-    for (const n of await readdirOrEmpty(dir)) {
-      if (!n.endsWith(ext)) continue;
-      const version = n.slice(0, -ext.length);
-      if (!RE.version.test(version)) continue;
-      const st = await lstatOrNull(path.join(dir, n));
-      if (!st?.isFile()) continue;
-      const time = version.slice(0, 24).replace(/^(\d{4}-\d\d-\d\dT\d\d)-(\d\d)-(\d\d\.\d{3}Z)$/, "$1:$2:$3");
-      out.push({ version, time, size: st.size });
+    const seen = new Set<string>();
+    for (const agent of [false, true]) {
+      const dir = this.notePath(id, agent ? "agent-history" : "history");
+      for (const n of await readdirOrEmpty(dir)) {
+        if (!n.endsWith(ext)) continue;
+        const version = n.slice(0, -ext.length);
+        // A name in both folders is the person's: `history/` is looked in first.
+        if (!RE.version.test(version) || seen.has(version)) continue;
+        const st = await lstatOrNull(path.join(dir, n));
+        if (!st?.isFile()) continue;
+        seen.add(version);
+        const time = version.slice(0, 24).replace(/^(\d{4}-\d\d-\d\dT\d\d)-(\d\d)-(\d\d\.\d{3}Z)$/, "$1:$2:$3");
+        out.push({ version, time, size: st.size, agent: agent ? (typeof names[version] === "string" ? names[version] : UNNAMED_AGENT) : null });
+      }
     }
     return out.sort((a, b) => b.version.localeCompare(a.version));
   }
@@ -535,7 +719,7 @@ export class UserSpace {
   async version(id: string, version: string): Promise<string> {
     const { kind } = await this.live(id);
     if (!RE.version.test(version)) throw new HttpError(404, "There is no such version.");
-    const bytes = await readRegular(this.notePath(id, { version, kind }));
+    const bytes = (await readRegular(this.notePath(id, { version, kind }))) ?? (await readRegular(this.notePath(id, { version, kind, agent: true })));
     if (!bytes) throw new HttpError(404, "There is no such version.");
     const text = decodeNote(bytes);
     if (text === null) throw new HttpError(422, "This version is not valid UTF-8.", {}, "not-utf8");

@@ -357,7 +357,7 @@ test("review 24-4: a failed history read does not leave another drawing's versio
   setClient({
     ...c,
     history: async (id) => {
-      if (id === "aaaaaaaaaaaaaaaaaaaaaaaa") return { versions: [{ version: "2026-11-10T14-02-11.512Z-k3fa", time: "2026-11-10T14:02:11.512Z", size: 3 }] };
+      if (id === "aaaaaaaaaaaaaaaaaaaaaaaa") return { versions: [{ version: "2026-11-10T14-02-11.512Z-k3fa", time: "2026-11-10T14:02:11.512Z", size: 3, agent: null }] };
       throw new ApiError(410, "trashed", "In the trash.");
     },
   });

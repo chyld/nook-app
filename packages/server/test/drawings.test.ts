@@ -51,7 +51,7 @@ test("create: a drawing.excalidraw of the form of 4.2; Untitled N counts notes a
   const { c, dir } = await setup();
   const d = await newDrawing(c);
   assert.equal(d.text, emptyDrawing("Untitled 1", today()));
-  assert.deepEqual(d.entry, { id: d.id, kind: "drawing", title: "Untitled 1", tags: [], created: today(), modified: d.entry.modified, size: Buffer.byteLength(d.text) });
+  assert.deepEqual(d.entry, { id: d.id, kind: "drawing", title: "Untitled 1", tags: [], created: today(), modified: d.entry.modified, size: Buffer.byteLength(d.text), agent: null });
   assert.deepEqual(await ls(path.join(dir, "notes", d.id)), ["drawing.excalidraw"]);
   const n = await c.create();
   assert.equal((await c.get(`/api/notes/${n.id}`)).json().entry.title, "Untitled 2", "a note counts drawings");

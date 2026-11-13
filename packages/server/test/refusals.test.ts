@@ -131,10 +131,10 @@ test("every route that needs a session answers 401 without one", async () => {
   const s = await startServer();
   const c = new Client(s.app);
   const fill = (url: string) =>
-    url.replace(":id", "a".repeat(24)).replace(":version", "2026-11-10T14-02-11.512Z-k3fa").replace(":file", url.startsWith("/api/fonts/") ? "1.woff2" : "p.png").replace(":name", "S").replace(":slug", "caveat");
+    url.replace(":id", "a".repeat(url.startsWith("/api/agents/") ? 16 : 24)).replace(":version", "2026-11-10T14-02-11.512Z-k3fa").replace(":file", url.startsWith("/api/fonts/") ? "1.woff2" : "p.png").replace(":name", "S").replace(":slug", "caveat");
   let checked = 0;
   for (const [name, def] of Object.entries(routes) as [string, RouteDef][]) {
-    if (!def.auth) continue;
+    if (def.auth !== "session") continue;
     // "document" is SPEC-DRAWINGS 5's name for the body of a save (a note's Markdown here).
     const doc = def.body === "markdown" || def.body === "document";
     const headers: Record<string, string> = doc ? { "content-type": "text/markdown", "if-match": "a".repeat(64) } : def.body === "multipart" ? { "content-type": "multipart/form-data; boundary=x" } : {};
@@ -144,6 +144,7 @@ test("every route that needs a session answers 401 without one", async () => {
       empty: { ids: [] },
       styleSave: { style: { name: "S", bold: true, italic: false, underline: false, strike: false, size: null, font: null, color: null, bg: null } },
       fontAdd: { slug: "caveat" },
+      agentMake: { name: "claude" },
     };
     const body = def.method === "GET" || def.method === "DELETE" ? undefined : doc ? "text" : def.body === "multipart" ? "--x--\r\n" : (json[name] ?? {});
     const r = await c.req(def.method, fill(def.url), body, headers);

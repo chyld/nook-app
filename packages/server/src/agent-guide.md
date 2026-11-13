@@ -1,0 +1,212 @@
+# Nook for agents
+
+Nook is a private notes app. With a token that a person made for you, you can list, read,
+create and save that person's notes and drawings over HTTP. This page is all you need; it needs
+no token.
+
+- Server: `{{SERVER}}`
+- Every address below begins `{{SERVER}}/api/agent/v1`
+- Send the token with every request but this page: `Authorization: Bearer nook_…`
+
+The examples use `curl` and these shell variables: `NOOK_TOKEN` (your token), `ID` (an item's
+id), `REVISION` and `VERSION` (values from earlier answers).
+
+## What you cannot do
+
+There is no route to delete, to move to the trash, to restore from the trash, or to add or open
+a photo. Do not look for one. If something must be removed, tell your person. You see and change
+only the items of the person whose token you have.
+
+## Items
+
+An item is a **note** or a **drawing**. Its `id` is 24 characters of `a-z` and `2-7`.
+
+| Kind | The document | Content-Type | Limit |
+|---|---|---|---|
+| note | Markdown, with front matter at the top | `text/markdown` | 2 MB |
+| drawing | an Excalidraw file (JSON) | `application/vnd.excalidraw+json` | 25 MB |
+
+A note looks like this. The lines between the two `---` lines are its front matter:
+
+```markdown
+---
+title: "Shopping"
+tags: [food, home]
+created: 2026-11-12
+---
+
+- oats
+- two lemons
+```
+
+A **tag** is 1 to 30 lower-case letters `a` to `z`. `food` is a tag; `meeting-notes`, `2026` and
+`Food` are not.
+
+Every answer about one item has `entry` (its `id`, `kind`, `title`, `tags`, `created`,
+`modified`, `size`, and `agent`: the name of the agent that last wrote it, or `null` for a
+person), and `url`: the page to give your person.
+
+## List and search
+
+```sh
+curl -sS "{{SERVER}}/api/agent/v1/items" -H "Authorization: Bearer $NOOK_TOKEN"
+```
+
+Answer: `{ "entries": [ … ], "tags": [ { "tag": "food", "count": 3 } ] }`, newest first. Add
+`?q=lemons` to search titles, tags and text, and `?tag=food` for one tag.
+
+## Create a note
+
+Put the Markdown in a file, `note.md`, without front matter, and give the title and tags in the
+address. The server writes the front matter.
+
+```sh
+curl -sS -X POST "{{SERVER}}/api/agent/v1/items?title=Shopping&tags=food,home" -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" --data-binary @note.md
+```
+
+Answer, status 201: `{ "id": "…", "revision": "…", "entry": { … }, "text": "…", "url": "…" }`.
+
+- Without `title`, the note's title is its first heading.
+- You may instead send a note that already has front matter; then leave `title` and `tags` out
+  of the address.
+- Always use `--data-binary`. Plain `-d` removes the line breaks.
+- If the answer to a create is lost, list before you send it again, or you make two notes.
+
+## Read
+
+```sh
+curl -sS "{{SERVER}}/api/agent/v1/items/$ID" -H "Authorization: Bearer $NOOK_TOKEN"
+```
+
+Answer: `{ "text": "…", "revision": "…", "entry": { … }, "url": "…" }`. `text` is the whole
+document, front matter included. `revision` is what you need to save.
+
+To get the document as a file, with its revision in the `ETag` header:
+
+```sh
+curl -sS "{{SERVER}}/api/agent/v1/items/$ID/text" -H "Authorization: Bearer $NOOK_TOKEN" -o note.md -D headers.txt
+```
+
+## Change an item
+
+Read it, change the text, and send **the whole document** back with the revision you read:
+
+```sh
+curl -sS -X PUT "{{SERVER}}/api/agent/v1/items/$ID" -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" -H "If-Match: $REVISION" --data-binary @note.md
+```
+
+Answer: `{ "revision": "…", "entry": { … }, "url": "…" }`. Use the new revision for your next
+save.
+
+- Keep the front matter. To change the title or tags, change them there.
+- Keep lines such as `![](note.assets/photo.jpg)` exactly as they are: they are the note's
+  photos, which you cannot open.
+- **409 `changed`**: someone saved since you read. The answer has `current` (`text`,
+  `revision`, `entry`). Make your change again on `current.text` and save with
+  `current.revision`. Never send your old text with the new revision: that undoes their work.
+- You cannot save a note empty (422 `empty`).
+
+## Add to the end of a note
+
+For a log, a list or a journal, append. It needs no revision and cannot overwrite anything:
+
+```sh
+curl -sS -X POST "{{SERVER}}/api/agent/v1/items/$ID/append" -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: text/markdown" --data-binary '- olive oil'
+```
+
+Answer: as a save. The text goes after one empty line at the end of the note.
+
+If the answer to an append is lost, **read the note before you send it again**, or the text is
+added twice. Or send `If-Match` with the revision you read: then a second try is refused with
+409 if the first one arrived.
+
+## Undo: history
+
+Every save keeps the text it replaced. To undo a save, read the old version and save its text.
+
+```sh
+curl -sS "{{SERVER}}/api/agent/v1/items/$ID/history" -H "Authorization: Bearer $NOOK_TOKEN"
+```
+
+Answer: `{ "versions": [ { "version": "…", "time": "…", "size": 123, "agent": null } ] }`, newest
+first. `agent` is the name of the agent that wrote that text, or `null` for a person.
+
+```sh
+curl -sS "{{SERVER}}/api/agent/v1/items/$ID/history/$VERSION" -H "Authorization: Bearer $NOOK_TOKEN"
+```
+
+Answer: `{ "text": "…" }`.
+
+## Drawings
+
+A drawing is an Excalidraw file. To make one, start from this complete example (two boxes with
+labels, a line of text, and an arrow from one box to the other), save it as
+`drawing.excalidraw`, and change it:
+
+```json
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "nook",
+  "elements": [
+    { "id": "box-a", "type": "rectangle", "x": 0, "y": 0, "width": 180, "height": 80, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a0", "roundness": { "type": 3 }, "seed": 101, "version": 1, "versionNonce": 201, "isDeleted": false, "boundElements": [ { "type": "text", "id": "label-a" }, { "type": "arrow", "id": "arrow-ab" } ], "updated": 1, "link": null, "locked": false },
+    { "id": "label-a", "type": "text", "x": 50, "y": 27.5, "width": 80, "height": 25, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a1", "roundness": null, "seed": 102, "version": 1, "versionNonce": 202, "isDeleted": false, "boundElements": [], "updated": 1, "link": null, "locked": false, "text": "Browser", "fontSize": 20, "fontFamily": 5, "textAlign": "center", "verticalAlign": "middle", "containerId": "box-a", "originalText": "Browser", "autoResize": true, "lineHeight": 1.25 },
+    { "id": "box-b", "type": "rectangle", "x": 360, "y": 0, "width": 180, "height": 80, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a2", "roundness": { "type": 3 }, "seed": 103, "version": 1, "versionNonce": 203, "isDeleted": false, "boundElements": [ { "type": "text", "id": "label-b" }, { "type": "arrow", "id": "arrow-ab" } ], "updated": 1, "link": null, "locked": false },
+    { "id": "label-b", "type": "text", "x": 415, "y": 27.5, "width": 70, "height": 25, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a3", "roundness": null, "seed": 104, "version": 1, "versionNonce": 204, "isDeleted": false, "boundElements": [], "updated": 1, "link": null, "locked": false, "text": "Server", "fontSize": 20, "fontFamily": 5, "textAlign": "center", "verticalAlign": "middle", "containerId": "box-b", "originalText": "Server", "autoResize": true, "lineHeight": 1.25 },
+    { "id": "arrow-ab", "type": "arrow", "x": 190, "y": 40, "width": 160, "height": 0, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a4", "roundness": { "type": 2 }, "seed": 105, "version": 1, "versionNonce": 205, "isDeleted": false, "boundElements": [], "updated": 1, "link": null, "locked": false, "points": [ [0, 0], [160, 0] ], "lastCommittedPoint": null, "startBinding": { "elementId": "box-a", "focus": 0, "gap": 10 }, "endBinding": { "elementId": "box-b", "focus": 0, "gap": 10 }, "startArrowhead": null, "endArrowhead": "arrow", "elbowed": false },
+    { "id": "note-1", "type": "text", "x": 0, "y": 130, "width": 260, "height": 25, "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null, "index": "a5", "roundness": null, "seed": 106, "version": 1, "versionNonce": 206, "isDeleted": false, "boundElements": [], "updated": 1, "link": null, "locked": false, "text": "One save, whole document", "fontSize": 20, "fontFamily": 5, "textAlign": "left", "verticalAlign": "top", "containerId": null, "originalText": "One save, whole document", "autoResize": true, "lineHeight": 1.25 }
+  ],
+  "appState": { "viewBackgroundColor": "#ffffff" },
+  "files": {}
+}
+```
+
+```sh
+curl -sS -X POST "{{SERVER}}/api/agent/v1/items?title=Architecture&tags=work" -H "Authorization: Bearer $NOOK_TOKEN" -H "Content-Type: application/vnd.excalidraw+json" --data-binary @drawing.excalidraw
+```
+
+The rules that keep a drawing whole:
+
+- Every element has its own `id`; `x` and `y` are its top left, in pixels, with y downward.
+- **A label in a box** is a `text` element whose `containerId` is the box's `id`, and the box
+  names it in `boundElements` as `{ "type": "text", "id": … }`. Put the text inside the box.
+- **An arrow between two boxes** has `startBinding` and `endBinding` with each box's `id`, and
+  each box names the arrow in `boundElements` as `{ "type": "arrow", "id": … }`. Its `x` and
+  `y` are where it starts; `points` are relative to that, the first always `[0, 0]`; `width`
+  and `height` are the extent of the points.
+- Give each element a different `seed`, `versionNonce` and `index` (`a0`, `a1`, `a2`, … in the
+  order they are drawn).
+- A text's `width` is about 11 pixels a character at `fontSize` 20, and its `height` 25 a line.
+  The app measures it properly when a person opens and saves the drawing.
+
+To change a drawing, read it, change the JSON, and save **all of it** with `PUT`, as for a
+note, with `Content-Type: application/vnd.excalidraw+json`. Keep `files` whole: it holds the
+drawing's images, and a save that drops one an element uses is refused (422 `missing-image`).
+Keep the `nook` key: it holds the title, tags and date. A drawing with images can be many
+megabytes. You cannot append to a drawing, or save one with no elements (422 `empty`).
+
+## Errors
+
+Every error is JSON, and `hint` says what to do next:
+
+```json
+{ "error": { "code": "changed", "message": "The note was changed since you opened it.", "hint": "Read the item again, apply your change to the new text, and save with the new revision." } }
+```
+
+| Status | Code | What happened | What to do |
+|---|---|---|---|
+| 400 | `bad-request` | The address, a header or a value is wrong | Read the hint; compare with the example here |
+| 401 | `no-token` | No token, or one that is revoked or unknown | Ask your person for a token |
+| 404 | `not-found` | No such item, version or route | Check the id; list to find it |
+| 409 | `changed` | The item was saved since you read it | Redo your change on `current.text`, save with `current.revision` |
+| 410 | `trashed` | A person moved the item to the trash | Tell your person; you cannot bring it back |
+| 413 | `too-large` | Over 2 MB for a note, 25 MB for a drawing | Send less |
+| 415 | `unsupported-type` | No `Content-Type`, or not the item's kind | Send the type from the table above |
+| 422 | `not-utf8`, `not-json`, `not-excalidraw`, `refused` | The document cannot be read | Send valid UTF-8; for a drawing, valid JSON with `type` and `elements` |
+| 422 | `broken-front-matter` | The front matter is not valid YAML | Mend what you sent; if the note already had it, tell your person |
+| 422 | `bad-tag`, `bad-title` | A tag or the title in the address is not acceptable | A tag is lower-case letters only; a title is at most 300 characters |
+| 422 | `empty` | The save would empty the item, or an append had no text | Send the whole document |
+| 422 | `missing-image` | The save would drop an image of a drawing | Read again and send `files` whole |
+| 428 | `no-revision` | A save without `If-Match` | Read the item and send its revision |
+| 429 | `busy` | More than 60 changes a minute or 300 MB a day for this person | Wait as the hint says |
+| 500, 503 | `server`, `unavailable` | The server failed | A save may or may not have been made: read the item before sending again |

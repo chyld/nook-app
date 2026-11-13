@@ -25,9 +25,12 @@ export type NotePart =
   | "drawing.excalidraw"
   | "note.assets"
   | "history"
+  | "agent-history"
+  | "writers.json"
   | "trashed.json"
   | { asset: string }
-  | { version: string; kind: Kind };
+  /** `agent`: a version an agent wrote, kept in `agent-history/` (SPEC-AGENTS 4.2). */
+  | { version: string; kind: Kind; agent?: boolean };
 
 /** Each kind's main file, which decides the kind of a folder (SPEC-DRAWINGS 4.1). */
 export const MAIN_FILE = { note: "note.md", drawing: "drawing.excalidraw" } as const satisfies Record<Kind, NotePart>;
@@ -47,6 +50,10 @@ export class DataLayout {
   }
   get usersFile(): string {
     return path.join(this.config, "users.json");
+  }
+  /** Agents' tokens, as hashes (SPEC-AGENTS 2.1). */
+  get agentsFile(): string {
+    return path.join(this.config, "agents.json");
   }
   get sessions(): string {
     return path.join(this.config, "sessions");
@@ -111,13 +118,13 @@ export class UserLayout {
     const dir = inside(where === "notes" ? this.notes : this.trash, noteId);
     let p: string;
     if (part === "dir") p = dir;
-    else if (part === "note.md" || part === "drawing.excalidraw" || part === "note.assets" || part === "history" || part === "trashed.json") p = inside(dir, part);
+    else if (part === "note.md" || part === "drawing.excalidraw" || part === "note.assets" || part === "history" || part === "agent-history" || part === "writers.json" || part === "trashed.json") p = inside(dir, part);
     else if ("asset" in part) {
       if (!RE.photoFile.test(part.asset)) throw new PathError("not a photo name");
       p = inside(inside(dir, "note.assets"), part.asset);
     } else {
       if (!RE.version.test(part.version)) throw new PathError("not a version");
-      p = inside(inside(dir, "history"), `${part.version}${EXT[part.kind]}`);
+      p = inside(inside(dir, part.agent ? "agent-history" : "history"), `${part.version}${EXT[part.kind]}`);
     }
     const rel = path.relative(this.root, p);
     if (rel.startsWith("..") || path.isAbsolute(rel)) throw new PathError("path leaves the user's folder");

@@ -165,6 +165,9 @@ export class Accounts {
   readonly gate = new HashGate();
   #dummyHash = "";
   now: () => number = Date.now;
+  /** SPEC-AGENTS 2.1: removes a user's agent tokens, under the accounts lock, before
+   *  users.json is written. Set by the context. */
+  removeTokensLocked: (userId: string) => Promise<void> = async () => {};
 
   constructor(layout: DataLayout, locks: Locks, log: Logger) {
     this.layout = layout;
@@ -244,8 +247,9 @@ export class Accounts {
       const u = this.byName(username);
       if (!u) throw new HttpError(404, "There is no such user.");
       // Sessions first: a crash between the two leaves the old password and no sessions, never
-      // the new password with the old sessions.
+      // the new password with the old sessions. The agents' tokens likewise (SPEC-AGENTS 2.1).
       await this.#deleteSessions(u.id);
+      await this.removeTokensLocked(u.id);
       await this.#saveUsers(this.users.map((x) => (x.id === u.id ? { ...x, hash } : x)));
     });
   }
@@ -253,6 +257,7 @@ export class Accounts {
   /** Under the accounts lock (the caller holds the user's lock first). */
   async removeUserLocked(userId: string): Promise<void> {
     await this.#deleteSessions(userId);
+    await this.removeTokensLocked(userId);
     await this.#saveUsers(this.users.filter((u) => u.id !== userId));
   }
 
@@ -388,8 +393,9 @@ export class Accounts {
     await this.locks.accounts.run(async () => {
       const u = this.byId(user.id);
       if (!u || u.hash !== checkedHash) throw new HttpError(409, "The password was changed at the same moment. Try again.");
-      // The other sessions first, as in resetPassword.
+      // The other sessions first, as in resetPassword, and the agents' tokens.
       await this.#deleteSessions(u.id, `${tokenHash}.json`);
+      await this.removeTokensLocked(u.id);
       await this.#saveUsers(this.users.map((x) => (x.id === u.id ? { ...x, hash } : x)));
     });
   }

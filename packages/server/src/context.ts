@@ -9,6 +9,7 @@ import { DataLayout } from "./layout.ts";
 import { Locks, type Release } from "./lock.ts";
 import type { Logger } from "./log.ts";
 import { Accounts, type User } from "./accounts.ts";
+import { Agents } from "./agents.ts";
 import { Spaces } from "./space.ts";
 import type { Config } from "./config.ts";
 import { sfs as fs } from "./safefs.ts";
@@ -22,6 +23,8 @@ export class Context {
   readonly locks = new Locks();
   readonly log: Logger;
   readonly accounts: Accounts;
+  /** Agents' tokens (SPEC-AGENTS 2). */
+  readonly agents: Agents;
   readonly spaces: Spaces;
   #pause: { releases: Release[]; timer: NodeJS.Timeout } | null = null;
   #pausing: Promise<void> | null = null;
@@ -31,6 +34,8 @@ export class Context {
     this.layout = new DataLayout(config.dataDir);
     this.log = log;
     this.accounts = new Accounts(this.layout, this.locks, log);
+    this.agents = new Agents(this.layout, this.locks, log, (id) => this.accounts.byId(id));
+    this.accounts.removeTokensLocked = (userId) => this.agents.removeForUserLocked(userId);
     this.spaces = new Spaces(this.layout, log);
   }
 
@@ -45,6 +50,7 @@ export class Context {
     await ensureDir(this.layout.cacheTmp);
     await emptyDir(this.layout.cacheTmp);
     await this.accounts.load();
+    await this.agents.load();
     for (const u of this.accounts.users) await this.spaces.run(u.id, (s) => s.start());
     await this.accounts.removeEndedSessions();
   }

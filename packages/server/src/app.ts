@@ -11,8 +11,10 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import { Value } from "@sinclair/typebox/value";
-import { DRAWING_TYPE, kindOfType, LIMITS, PAGES, routes, type Answer, type Kind, type RouteDef, type RouteName } from "../../contract/src/index.ts";
+import { AGENT_BASE, DOCUMENT_TYPE, DRAWING_TYPE, isAgentPath, kindOfType, LIMITS, PAGES, RE, routes, type Answer, type Auth, type Entry, type Kind, type RouteDef, type RouteName } from "../../contract/src/index.ts";
 import { Accounts, type User } from "./accounts.ts";
+import { hintFor } from "./agent-hints.ts";
+import { bearerToken } from "./agents.ts";
 import type { Context } from "./context.ts";
 import { errorBody, HttpError } from "./errors.ts";
 import { Fonts } from "./fonts.ts";
@@ -28,9 +30,12 @@ declare module "fastify" {
     user?: User;
     tokenHash?: string;
     started?: bigint;
+    /** The name of the agent whose token let the request in (SPEC-AGENTS 3.1). */
+    agentName?: string;
   }
   interface FastifyContextConfig {
-    auth?: boolean;
+    /** SPEC-AGENTS 3.1: the session cookie, an agent's token, or no check. */
+    auth?: Auth;
     body?: string;
   }
 }
@@ -104,19 +109,26 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   // --- every request ---------------------------------------------------------------------------
   app.addHook("onRequest", async (req) => {
     req.started = process.hrtime.bigint();
+    // SPEC-AGENTS 3.2: under /api/agent/ an address or method that is no route is answered by
+    // the not-found handler, whatever its headers and body.
+    const agentPath = isAgentPath(req.url);
+    if (agentPath && req.routeOptions.url === undefined) return;
     if (req.method === "GET" || req.method === "HEAD") return;
     // Section 5: a change comes from this site: the same scheme, host and port. The scheme is the
     // request's own, or the one Caddy says the browser used (X-Forwarded-Proto, trusted only
-    // from Caddy).
-    const origin = req.headers.origin;
-    const host = req.headers.host;
-    let ok = false;
-    try {
-      ok = typeof origin === "string" && typeof host === "string" && new URL(origin).origin === new URL(`${req.protocol}://${host}`).origin;
-    } catch {
-      ok = false;
+    // from Caddy). Not asked of an agent address: a program sends no Origin, and no browser
+    // sends a token by itself.
+    if (!agentPath) {
+      const origin = req.headers.origin;
+      const host = req.headers.host;
+      let ok = false;
+      try {
+        ok = typeof origin === "string" && typeof host === "string" && new URL(origin).origin === new URL(`${req.protocol}://${host}`).origin;
+      } catch {
+        ok = false;
+      }
+      if (!ok) throw new HttpError(403, "This request did not come from this site.");
     }
-    if (!ok) throw new HttpError(403, "This request did not come from this site.");
     const type = bodyType(req);
     const hasBody = Number(req.headers["content-length"] ?? "0") > 0 || req.headers["transfer-encoding"] !== undefined;
     if ((type !== "" || hasBody) && !CHANGING_TYPES.has(type)) throw new HttpError(415, `Requests that change something are JSON, text/markdown, ${DRAWING_TYPE} or a file upload.`);
@@ -153,7 +165,22 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   });
 
   app.addHook("preHandler", async (req, reply) => {
-    if (req.routeOptions.config?.auth === false || req.routeOptions.url === undefined) return;
+    const auth = req.routeOptions.config?.auth;
+    if (auth === "none" || req.routeOptions.url === undefined) return;
+    if (auth === "token") {
+      // SPEC-AGENTS 3.1: the token and never the cookie. The user is the token's.
+      const found = await ctx.agents.lookup(bearerToken(req.headers.authorization));
+      if (!found) throw new HttpError(401, "A token is needed.", {}, "no-token");
+      req.user = found.user;
+      req.agentName = found.agent.name;
+      // 3.3: a changing request is counted once its token is accepted, before anything else.
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        const bytes = Buffer.isBuffer(req.body) ? req.body.length : Number(req.headers["content-length"] ?? "0") || 0;
+        ctx.agents.count(found.user.id, bytes);
+      }
+      return;
+    }
+    // Every other route: the cookie and never a token.
     const result = await ctx.accounts.session(req.cookies[SESSION_COOKIE]);
     if (!result) throw new HttpError(401, "Please log in.");
     req.user = result.user;
@@ -174,18 +201,46 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
     ctx.log.info(`${req.method} ${req.routeOptions.url ?? "(no route)"} ${reply.statusCode} ${ms.toFixed(1)}ms`);
   });
 
+  /** The address the request itself used: its scheme and Host, as the Origin check reads them
+   *  (SPEC-AGENTS 5). Nook answers on more than one address; this gives back the agent's. */
+  const serverOf = (req: FastifyRequest): string => `${req.protocol}://${req.headers.host ?? "localhost"}`;
+  const guideOf = (req: FastifyRequest): string => serverOf(req) + AGENT_BASE;
+
+  /** Sends an error. On an agent address its `error` has a hint (SPEC-AGENTS 5.8): the one
+   *  given, or the general one of its code. */
+  const refuse = (req: FastifyRequest, reply: FastifyReply, status: number, body: Record<string, unknown>, hint?: string) => {
+    if (isAgentPath(req.url)) {
+      const error = body.error as { code: string; message: string };
+      body = { ...body, error: { ...error, hint: hint ?? hintFor(status, error.code, guideOf(req)) } };
+    }
+    return reply.status(status).send(body);
+  };
+
   app.setErrorHandler((err, req, reply) => {
-    if (err instanceof HttpError) return reply.status(err.status).send(err.body);
-    if (err instanceof LinkRefused || err instanceof PathError) return reply.status(404).send(errorBody(404, "Not found."));
-    const e = err as { statusCode?: number; validation?: unknown; code?: string };
-    if (e.validation) return reply.status(400).send(errorBody(400, "The request does not match its schema."));
+    if (err instanceof HttpError) {
+      let hint = err.hint;
+      // A document past its kind's limit: the size and the limit, which the body carries.
+      if (hint === undefined && err.status === 413 && typeof err.extra.size === "number" && typeof err.extra.limit === "number") {
+        hint = `The document is ${err.extra.size} bytes and the limit is ${err.extra.limit}. Send a smaller one.`;
+      }
+      if (hint === undefined && err.status === 409 && err.code === "changed" && err.extra.current === undefined) {
+        hint = "The item was changed since you read it, and its file cannot now be read as text. A person must mend it in the app.";
+      }
+      return refuse(req, reply, err.status, err.body, hint);
+    }
+    if (err instanceof LinkRefused || err instanceof PathError) return refuse(req, reply, 404, errorBody(404, "Not found."));
+    const e = err as { statusCode?: number; validation?: unknown; code?: string; message?: string };
+    if (e.validation) {
+      // Fastify's message names the part at fault ("params/id must match pattern …").
+      return refuse(req, reply, 400, errorBody(400, "The request does not match its schema."), `${e.message ?? "A value is not of the form this route takes"}. The guide at ${guideOf(req)} shows each route with an example.`);
+    }
     const status = e.statusCode;
     if (status && status >= 400 && status < 500) {
       const message = status === 413 ? "The request is too large." : status === 415 ? "Unsupported content type." : "Bad request.";
-      return reply.status(status).send(errorBody(status, message));
+      return refuse(req, reply, status, errorBody(status, message));
     }
     ctx.log.error(`${req.method} ${req.routeOptions.url ?? ""} failed: ${(err as NodeJS.ErrnoException).code ?? (err as Error).name}`);
-    return reply.status(500).send(errorBody(500, "Something went wrong on the server."));
+    return refuse(req, reply, 500, errorBody(500, "Something went wrong on the server."));
   });
 
   // --- helpers ---------------------------------------------------------------------------------
@@ -202,6 +257,18 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   /** The kind a document body's type names (the body check let only those two through). */
   const kindOfBody = (req: FastifyRequest): Kind => kindOfType(bodyType(req)) ?? "note";
   const fonts = new Fonts(ctx);
+  /** SPEC-AGENTS 5: the full address of an item's page, for an agent to give its person. */
+  const pageOf = (req: FastifyRequest, entry: Entry): string => `${serverOf(req)}/${entry.kind === "note" ? "n" : "d"}/${entry.id}`;
+  /** SPEC-AGENTS 5.6: the revision of `If-Match`, with or without quotes; null when there is no
+   *  header; 400 when it is not a revision. */
+  const revisionSent = (req: FastifyRequest): string | null => {
+    const raw = req.headers["if-match"];
+    if (raw === undefined) return null;
+    const rev = String(raw).trim().replace(/^"|"$/g, "");
+    if (!RE.revision.test(rev)) throw new HttpError(400, "If-Match is not a revision.", {}, "bad-request", "If-Match takes the revision exactly as you read it: 64 hex characters, with or without quotes.");
+    return rev;
+  };
+  const guide = await loadGuide();
 
   const sendFile = (reply: FastifyReply, f: { fh: FileHandle; size: number }, type: string) => {
     reply.header("cache-control", "private");
@@ -353,6 +420,74 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
       return reply.send(css);
     },
     fontFile: async (req, reply) => sendFile(reply, await fonts.open(ctx.spaces.get(userOf(req).id), params(req).slug, params(req).file), "font/woff2"),
+
+    // --- agents' tokens, for the browser (SPEC-AGENTS 2.2) --------------------------------------
+    agents: async (req) => ({ agents: ctx.agents.list(userOf(req).id) }),
+    agentMake: async (req, reply) => {
+      const made = await ctx.agents.make(userOf(req).id, (req.body as { name: string }).name);
+      return reply.status(201).send(made);
+    },
+    agentRevoke: async (req) => {
+      await ctx.agents.revoke(userOf(req).id, params(req).id);
+      return {};
+    },
+
+    // --- the agent routes (SPEC-AGENTS 5) --------------------------------------------------------
+    agentGuide: async (req, reply) => {
+      reply.type("text/markdown; charset=utf-8");
+      return reply.send(guide.replaceAll("{{SERVER}}", serverOf(req)));
+    },
+    agentList: async (req) => {
+      const q = req.query as { tag?: string; q?: string };
+      return run(req, (s) => s.list(q.tag || undefined, q.q || undefined));
+    },
+    agentCreate: async (req, reply) => {
+      const q = req.query as { title?: string; tags?: string };
+      // 5.5: the title and the tags are checked before anything else.
+      const title = (q.title ?? "").trim();
+      if ([...title].length > LIMITS.titleMax || /[\u0000-\u001f\u007f-\u009f]/u.test(title)) {
+        throw new HttpError(422, `A title may be at most ${LIMITS.titleMax} characters, without control characters.`, {}, "bad-title", `The title sent has ${[...title].length} characters. Send one of at most ${LIMITS.titleMax}, without control characters.`);
+      }
+      const tags: string[] = [];
+      for (const part of (q.tags ?? "").split(",")) {
+        const tag = part.trim();
+        if (tag === "" || tags.includes(tag)) continue;
+        if (!RE.tag.test(tag)) throw new HttpError(422, `"${tag}" is not a tag.`, { tag }, "bad-tag", `A tag is 1 to 30 lower-case letters a to z. "${tag}" is not: leave out digits, hyphens, spaces and capitals.`);
+        tags.push(tag);
+      }
+      const kind = kindOfBody(req);
+      // A note may be created with no body at all: an empty note.
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const r = await run(req, (s) => s.agentCreate(bytes, kind, title === "" ? null : title, tags, req.agentName!));
+      return reply.status(201).send({ id: r.id, revision: r.revision, entry: r.entry, text: r.text, url: pageOf(req, r.entry) });
+    },
+    agentRead: async (req) => {
+      const r = await run(req, (s) => s.read(params(req).id));
+      return { ...r, url: pageOf(req, r.entry) };
+    },
+    agentText: async (req, reply) => {
+      const r = await run(req, (s) => s.read(params(req).id));
+      // The text is the file exactly as decoded (4.4), so these are its bytes.
+      reply.header("etag", `"${r.revision}"`);
+      reply.type(r.entry.kind === "note" ? "text/markdown; charset=utf-8" : DOCUMENT_TYPE.drawing);
+      return reply.send(Buffer.from(r.text, "utf8"));
+    },
+    agentSave: async (req) => {
+      const rev = revisionSent(req);
+      if (rev === null) throw new HttpError(428, "A save needs the revision you read.", {}, "no-revision");
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const kind = kindOfBody(req);
+      const r = await run(req, (s) => s.save(params(req).id, rev, bytes, kind, req.agentName!));
+      return { ...r, url: pageOf(req, r.entry) };
+    },
+    agentAppend: async (req) => {
+      const rev = revisionSent(req);
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const r = await run(req, (s) => s.append(params(req).id, rev, bytes, req.agentName!));
+      return { ...r, url: pageOf(req, r.entry) };
+    },
+    agentHistory: async (req) => ({ versions: await run(req, (s) => s.history(params(req).id)) }),
+    agentVersion: async (req) => ({ text: await run(req, (s) => s.version(params(req).id, params(req).version)) }),
   };
   for (const name of Object.keys(routes) as RouteName[]) {
     const d = routes[name] as RouteDef;
@@ -380,9 +515,9 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
     reply.type("text/html; charset=utf-8");
     return reply.status(status).send(page.replaceAll("__CSP_NONCE__", nonce));
   };
-  for (const p of PAGES) app.get(p, { config: { auth: false } }, async (_req, reply) => sendPage(reply));
+  for (const p of PAGES) app.get(p, { config: { auth: "none" } }, async (_req, reply) => sendPage(reply));
 
-  app.get("/assets/*", { config: { auth: false } }, async (req, reply) => {
+  app.get("/assets/*", { config: { auth: "none" } }, async (req, reply) => {
     const rel = (req.params as { "*": string })["*"];
     if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(rel) || rel.split("/").some((p) => p.startsWith("."))) throw new HttpError(404, "Not found.");
     const type = ASSET_TYPES[path.extname(rel)];
@@ -394,7 +529,7 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
     return reply.send(data);
   });
 
-  app.get("/favicon.svg", { config: { auth: false } }, async (_req, reply) => {
+  app.get("/favicon.svg", { config: { auth: "none" } }, async (_req, reply) => {
     reply.header("cache-control", "public, max-age=86400");
     reply.type("image/svg+xml");
     return reply.send(FAVICON);
@@ -403,7 +538,8 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   // An unknown address: the page, which shows "Not found" (9.1); under /api, a JSON 404.
   app.setNotFoundHandler((req, reply) => {
     if (req.method === "GET" && !req.url.startsWith("/api/") && !req.url.startsWith("/assets/")) return sendPage(reply, 404);
-    return reply.status(404).send(errorBody(404, "Not found."));
+    // Under /api/agent/ (SPEC-AGENTS 3.2): an address or a method that is no route, with a hint.
+    return refuse(req, reply, 404, errorBody(404, "Not found."));
   });
 
   return app;
@@ -425,6 +561,11 @@ async function loadPage(dist: string): Promise<string> {
   const built = await fsp.readFile(path.join(dist, "index.html"), "utf8").catch(() => null);
   if (built) return built;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="csp-nonce" content="__CSP_NONCE__"><title>Nook</title></head><body><p>The web app has not been built. Run npm run build.</p></body></html>`;
+}
+
+/** SPEC-AGENTS 5.1: the guide's text, with `{{SERVER}}` where the server's address goes. */
+async function loadGuide(): Promise<string> {
+  return fsp.readFile(new URL("./agent-guide.md", import.meta.url), "utf8");
 }
 
 export function setSessionCookie(reply: FastifyReply, token: string, maxAge: number): void {

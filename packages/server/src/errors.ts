@@ -11,6 +11,7 @@ const CODES: Record<number, string> = {
   413: "too-large",
   415: "unsupported-type",
   422: "refused",
+  428: "no-revision",
   429: "busy",
   500: "server",
   502: "upstream",
@@ -22,12 +23,15 @@ export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
   readonly extra: Record<string, unknown>;
+  /** What to do next (SPEC-AGENTS 5.8). Sent only on an agent address, inside `error`. */
+  hint?: string;
 
-  constructor(status: number, message: string, extra: Record<string, unknown> = {}, code = CODES[status] ?? "error") {
+  constructor(status: number, message: string, extra: Record<string, unknown> = {}, code = CODES[status] ?? "error", hint?: string) {
     super(message);
     this.status = status;
     this.code = code;
     this.extra = extra;
+    this.hint = hint;
   }
 
   get body(): Record<string, unknown> {
