@@ -1,6 +1,6 @@
 {
   "overrides": [{ "files": ["**/*.svelte"], "customSyntax": "postcss-html" }],
-  "ignoreFiles": ["packages/web/src/styles/tokens.css", "packages/web/dist/**"],
+  "ignoreFiles": ["packages/web/src/styles/tokens.css", "packages/web/src/drawing/*.css", "packages/web/dist/**"],
   "rules": {
     "color-no-hex": true,
     "color-named": "never",

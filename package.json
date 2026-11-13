@@ -22,6 +22,7 @@
     "@codemirror/language": "^6.13.1",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
+    "@excalidraw/excalidraw": "0.18.1",
     "@fastify/cookie": "^11.1.5",
     "@fastify/multipart": "^10.1.8",
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
@@ -31,6 +32,8 @@
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.17",
     "fastify": "^5.12.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "sharp": "^0.35.5"
   },
   "devDependencies": {

@@ -265,3 +265,71 @@ plain folder (2026-11-12). `compose.yaml` now binds `./data/notes` to `/srv/note
 and a one-shot service, `owner`, gives `./data/notes` and the admin socket's volume to that user
 before the app starts (Docker makes a missing folder as root). The one named volume left,
 `notes-run`, holds only the admin socket. The container hardening of section 5 is unchanged.
+
+# Notes on SPEC-DRAWINGS.md (draft 5)
+
+Where the drawings build departs from `SPEC-DRAWINGS.md`, or that document was silent. Section
+numbers are that document's.
+
+## Section 2: the first step (2026-11-12)
+
+A temporary page (`/spike`, removed again) mounted Excalidraw 0.18.1 from the production build
+(`npm run build`), served by the real server under the policy of 3.2, and was driven in
+Chromium through Playwright (with internet access). Found:
+
+- **It works under the policy as written.** It drew a rectangle, typed text, took an image by a
+  drop (kept in `files` as a `data:` URL), embedded a YouTube page (`frame-src https:`), opened
+  the library sidebar, took in a library sent back in the address, and inserted a Mermaid
+  diagram. **The policy blocked nothing**: no directive was added. Opening a note requested no
+  Excalidraw file.
+- **Fonts.** Excalidraw's font faces (Excalifont, Virgil, Nunito, Lilita, Comic Shanns,
+  Cascadia, Liberation, Xiaolai) are fetched from `window.EXCALIDRAW_ASSET_PATH` +
+  `fonts/<Family>/<file>.woff2`, so from `/assets/excalidraw/fonts/…`; only if that fails does it
+  fall back to `https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/`, which was never asked
+  for. The four Assistant faces of its own interface are `url()`s in its CSS, which Vite bundles
+  as hashed files in `/assets/`. `.woff2` was already in `ASSET_TYPES`; nothing was added. The
+  one font from another address in the whole run (Roboto from `fonts.gstatic.com`) was asked
+  for by the embedded YouTube page inside its own frame, not by Nook's page: the e2e case
+  counts the main frame's requests only.
+- **Vite needs no `define`.** The package's production build has its environment values
+  written in; the bundle builds and runs without `process` or `import.meta.env` values. Vite
+  warns about the `"use client"` directives of Radix modules; the warnings are harmless and are
+  silenced in `vite.config.ts`.
+- **CSS.** `cssCodeSplit` is now `true`: Excalidraw's CSS (about 140 KB) is its own file,
+  `mount-*.css`, loaded with `mount-*.js` (about 1.3 MB, with React and further chunks loaded on
+  demand: Mermaid, KaTeX, the font subsetting worker, locales). Its rules outside `.excalidraw`
+  are qualified by its own class names (`.exc-stats .title`, `.zoom-actions`,
+  `.LoadingMessage`, …) and `:root` custom properties (`--zIndex-*`, `--sa*`) that no token of
+  the app uses; none restyles the app, so no override was needed.
+- **Opening a scene changes no element's version.** A scene with a rectangle and its bound
+  text, free text in each of the nine font families, and an image was taken out of Excalidraw,
+  then opened again by a page load, twice: after the scene, `document.fonts.ready` and one
+  frame, and again three seconds later, every element had the version it was saved with.
+  `onChange` is called twice on opening with nothing changed, which the signature of 4.3
+  ignores. The baseline is still taken at the moment 4.3 names.
+- **Real names in 0.18.1:**
+  - Props: `initialData` (`elements`, `appState`, `files`, `libraryItems`, `scrollToContent`),
+    `onChange(elements, appState, files)`, `onLibraryChange(items)`, `libraryReturnUrl`,
+    `excalidrawAPI(api)`, `viewModeEnabled`, `theme`, `aiEnabled`, `isCollaborating`,
+    `UIOptions.canvasActions` (`toggleTheme`, `saveToActiveFile`, `loadScene`, `export`,
+    `saveAsImage`, `clearCanvas`, `changeViewBackgroundColor`), `renderTopRightUI` (not given,
+    so there is no collaboration button).
+  - The menu: `MainMenu` with `MainMenu.DefaultItems.LoadScene`, `Export`, `SaveAsImage`,
+    `SearchMenu`, `Help`, `ClearCanvas`, `ChangeCanvasBackground` (and the ones Nook leaves
+    out: `LiveCollaborationTrigger`, `Socials`, `ToggleTheme`, `SaveToActiveFile`,
+    `CommandPalette`). Giving a `MainMenu` replaces the default one.
+  - The API: `getSceneElementsIncludingDeleted()`, `getSceneElements()`, `getAppState()`,
+    `getFiles()`, `addFiles(files)`, `updateScene({ elements, appState, captureUpdate })` with
+    `CaptureUpdateAction.IMMEDIATELY | NEVER`, `history.clear()`.
+  - `appState` keys: `viewBackgroundColor`, `gridSize`, `gridStep`, `gridModeEnabled` (as 4.2
+    names them).
+  - Library: `useHandleLibrary({ excalidrawAPI })` takes in `#addLibrary=<url>&token=…` (it asks
+    "This will add N shape(s) to your library. Are you sure?" with `window.confirm`, then removes
+    the hash); by default it accepts only libraries from `excalidraw.com` addresses.
+  - An image element Excalidraw makes from a drop has `status: "pending"` (excalidraw.com marks
+    it `"saved"` once its own backend has the file); it is drawn either way, and Nook keeps the
+    status as Excalidraw gives it.
+- **The AI features** are hidden by `aiEnabled: false`: "Text to diagram" and "Wireframe to
+  code" go; the tools menu keeps its heading "Generate" over "Mermaid to Excalidraw", which is
+  not an AI feature. **Excalidraw+**: with Nook's own `MainMenu` there is no link to it but the
+  help dialog's "Blog" button (`plus.excalidraw.com/blog`), hidden by CSS.

@@ -35,19 +35,22 @@ declare module "fastify" {
   }
 }
 
-export const CSP = (nonce: string) =>
-  [
-    "default-src 'none'",
-    "script-src 'self'",
-    `style-src-elem 'self' 'nonce-${nonce}'`,
-    "style-src-attr 'unsafe-inline'",
-    "img-src 'self' blob:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "base-uri 'none'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-  ].join("; ");
+/** SPEC-DRAWINGS 3.2: one policy, a loose one, sent with every page. The style nonce is not in
+ *  it (a nonce would switch 'unsafe-inline' off); the page keeps its `csp-nonce` meta tag. */
+export const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https:",
+  "connect-src 'self' data: blob: https:",
+  "worker-src 'self' blob:",
+  "frame-src https:",
+  "media-src 'self' data: blob: https:",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
 
 type Handler<N extends RouteName> = (req: FastifyRequest, reply: FastifyReply) => Promise<Answer<N> | FastifyReply | void>;
 type Handlers = { [N in RouteName]: Handler<N> };
@@ -360,7 +363,7 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   const page = await loadPage(ctx.config.webDist);
   const sendPage = (reply: FastifyReply, status = 200) => {
     const nonce = randomBytes(16).toString("base64");
-    reply.header("content-security-policy", CSP(nonce));
+    reply.header("content-security-policy", CSP);
     reply.header("x-frame-options", "DENY");
     reply.type("text/html; charset=utf-8");
     return reply.status(status).send(page.replaceAll("__CSP_NONCE__", nonce));

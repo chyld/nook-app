@@ -276,11 +276,13 @@ test("the page: every address of 9.1 with a fresh nonce and the policy; unknown 
     const r = await c.get(p);
     assert.equal(r.statusCode, 200, p);
     assert.match(r.headers["content-type"] as string, /text\/html/);
+    // SPEC-DRAWINGS 3.2: one loose policy, without the nonce; the page keeps its csp-nonce tag.
     const csp = r.headers["content-security-policy"] as string;
-    assert.ok(csp.includes("default-src 'none'; script-src 'self'; style-src-elem 'self' 'nonce-"), csp);
-    assert.ok(csp.includes("style-src-attr 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"));
-    const nonce = /'nonce-([^']+)'/.exec(csp)![1];
-    assert.ok(r.body.includes(`content="${nonce}"`), "the nonce is in the page");
+    assert.equal(
+      csp,
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' data: blob: https:; worker-src 'self' blob:; frame-src https:; media-src 'self' data: blob: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    );
+    const nonce = /<meta name="csp-nonce" content="([^"]+)">/.exec(r.body)![1];
     nonces.add(nonce);
   }
   assert.equal(nonces.size, 8, "a fresh nonce each time");
