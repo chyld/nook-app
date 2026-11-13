@@ -1,3 +1,14 @@
 /* SPEC-DRAWINGS 3.1, 3.3: Excalidraw's CSS is not in a layer. What Nook hides of it (the
    collaboration, the AI features and the links to Excalidraw+) is hidden here. Exempt from the
    token and raw-colour rules, as paper.css is. */
+
+/* The help dialog's "Blog" button leads to Excalidraw+ (plus.excalidraw.com). */
+.excalidraw .HelpDialog__btn[href*="plus.excalidraw.com"] {
+  display: none;
+}
+
+/* Excalidraw fills the host Nook gives it. */
+.excalidraw-host {
+  position: relative;
+  height: 100%;
+}

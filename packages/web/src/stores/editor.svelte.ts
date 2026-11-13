@@ -2,10 +2,16 @@
 // order mark, saving, conflict, mode. The view registers a `getText()` with it; `dirty` is that
 // text compared with the saved text. The editor's text, selection and `typing` live in
 // CodeMirror and nowhere else.
+//
+// SPEC-DRAWINGS 6: the store has a kind. For a drawing it does not use `core`'s `load` and
+// `serialize`: the view gives its scene (`scene()`), from which the store makes the text to save
+// (4.2) and the text of a draft (4.5, without images), and "unsaved" is the drawing's signature
+// compared with the baseline (4.3). The title and tags of a drawing live here.
 
-import type { Entry, NoteDoc } from "../../../contract/src/index.ts";
-import { load, serialize, type Eol, type Mode } from "../../../core/src/index.ts";
+import { MB, type Entry, type Kind, type NoteDoc } from "../../../contract/src/index.ts";
+import { drawingFacts, drawingSignature, load, sceneOf, serialize, serializeDrawing, usedFileIds, type DrawingNook, type DrawingScene, type Eol, type Mode } from "../../../core/src/index.ts";
 import { api, ApiError } from "../lib/api.ts";
+import { router } from "../lib/router.svelte.ts";
 import { drafts, type Draft } from "./drafts.svelte.ts";
 import { library } from "./library.svelte.ts";
 import { prefs } from "./prefs.svelte.ts";
@@ -20,9 +26,17 @@ export interface ViewHandle {
   getText(): string;
   setText(text: string): void;
   /** Writes into the text what is held outside it: a focused table cell's unsaved content (7.7).
-   *  Called before the text is read for a save, a draft or the "unsaved changes" check. */
+   *  Called before the text is read for a save, a draft or the "unsaved changes" check. A
+   *  drawing's view tells the store of its last change at once (SPEC-DRAWINGS 4.3). */
   flush?(): void;
+  /** A drawing's view: the scene as Excalidraw has it. */
+  scene?(): DrawingScene;
+  /** A drawing's view: replaces the scene; resolves once the drawing is ready again (4.3). */
+  load?(scene: DrawingScene): Promise<void>;
 }
+
+/** The address of an item of a kind. */
+export const itemPath = (kind: Kind, id: string) => `/${kind === "note" ? "n" : "d"}/${id}`;
 
 /** How long typing must stop before a draft is stored. */
 export const DRAFT_DELAY = 600;
@@ -54,6 +68,13 @@ const blank = () => ({
   offered: [] as Draft[],
   photosMissing: false,
   loadedText: "",
+  /** SPEC-DRAWINGS 6: the open item's kind, and for a drawing its title, tags and date, and the
+   *  signature of what was last read or saved (4.3). */
+  kind: "note" as Kind,
+  nook: { title: "", tags: [], created: null } as DrawingNook,
+  baseline: "",
+  /** The item turned out to be of the other kind: the store has gone to its address. */
+  wrongKind: false,
 });
 
 const s = $state(blank());
@@ -65,6 +86,31 @@ let generation = 0;
 
 function text(): string {
   return view ? view.getText() : s.saved;
+}
+
+const drawing = () => s.kind === "drawing";
+const what = () => (drawing() ? "drawing" : "note");
+
+/** A drawing's scene: the view's, or the saved file's while there is no view. */
+function scene(): DrawingScene {
+  return view?.scene?.() ?? sceneOf(s.saved) ?? { elements: [], appState: {}, files: {} };
+}
+/** 4.3: the signature of the drawing on screen. */
+function signature(sc: DrawingScene = scene()): string {
+  return drawingSignature(sc.elements, sc.appState, s.nook.title, s.nook.tags);
+}
+/** 4.5: a drawing's draft: its serialization with `files` empty. */
+function draftText(sc: DrawingScene = scene()): string {
+  return serializeDrawing({ ...sc, files: {} }, s.nook);
+}
+/** The text a save sends: a note's bytes, or a drawing's whole file (4.4). */
+function saveText(): string {
+  return drawing() ? serializeDrawing(scene(), s.nook) : serialize(text(), s.eol, s.bom);
+}
+/** Whether what is on screen differs from what was last read or saved. */
+function unsavedNow(): boolean {
+  if (drawing()) return view?.scene !== undefined && signature() !== s.baseline;
+  return differs(text());
 }
 
 function userId(): string {
@@ -84,7 +130,17 @@ function flushView(): void {
 }
 
 function storeDraftNow(): void {
-  if (!s.id || !userId()) return;
+  if (!s.id || !userId() || s.loading) return;
+  if (drawing()) {
+    if (!view?.scene) return;
+    if (!unsavedNow()) {
+      const d = drafts.get(userId(), s.id, s.editorId);
+      if (d) drafts.remove(d.key);
+      return;
+    }
+    drafts.put(userId(), s.id, s.editorId, draftText(), s.base, Date.now(), "drawing");
+    return;
+  }
   const t = text();
   if (!differs(t)) {
     const d = drafts.get(userId(), s.id, s.editorId);
@@ -95,6 +151,21 @@ function storeDraftNow(): void {
 }
 
 function adopt(doc: { text: string; revision: string; entry: Entry }): void {
+  s.kind = doc.entry.kind;
+  if (doc.entry.kind === "drawing") {
+    const f = drawingFacts(doc.text);
+    s.base = doc.revision;
+    s.saved = doc.text;
+    s.nook = { title: f.title, tags: f.tags, created: f.created };
+    s.entry = doc.entry;
+    s.loadedText = doc.text;
+    s.eol = "\n";
+    s.bom = false;
+    s.savedEol = "\n";
+    s.savedBom = false;
+    s.mixed = false;
+    return;
+  }
   const l = load(doc.text);
   s.base = doc.revision;
   s.saved = l.text;
@@ -159,6 +230,20 @@ export const editor = {
   get mode(): Mode {
     return mode.value;
   },
+  get kind(): Kind {
+    return s.kind;
+  },
+  /** A drawing's title, tags and date (SPEC-DRAWINGS 4.2). */
+  get nook(): DrawingNook {
+    return s.nook;
+  },
+  get wrongKind(): boolean {
+    return s.wrongKind;
+  },
+  /** A drawing's whole text (4.2): the test hook's `text()`. */
+  drawingText(): string {
+    return serializeDrawing(scene(), s.nook);
+  },
   /** The text the view starts with. */
   get loadedText() {
     return s.loadedText;
@@ -174,12 +259,20 @@ export const editor = {
 
   register(h: ViewHandle | null): void {
     view = h;
+    // A drawing's view registers once it is ready after its file was read: the baseline (4.3).
+    if (h?.scene && drawing()) s.baseline = signature();
+    editor.changed();
+  },
+
+  /** A drawing's title or tags changed (unsaved until Save). */
+  setNook(n: Partial<Pick<DrawingNook, "title" | "tags">>): void {
+    s.nook = { ...s.nook, ...n };
     editor.changed();
   },
 
   /** The view's text changed: `dirty` again, and a draft a moment after typing stops. */
   changed(): void {
-    s.dirty = s.id !== null && differs(text());
+    s.dirty = s.id !== null && !s.loading && unsavedNow();
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = setTimeout(storeDraftNow, DRAFT_DELAY);
   },
@@ -199,22 +292,29 @@ export const editor = {
     storeDraftNow();
   },
 
-  /** Opens a note; offers every draft found for it. */
-  async open(id: string): Promise<void> {
+  /** Opens a note or a drawing; offers every draft found for it. With `expected`, an item of the
+   *  other kind is not opened: the store goes to its address instead (SPEC-DRAWINGS 6). */
+  async open(id: string, expected?: Kind): Promise<void> {
     const g = ++generation;
     if (draftTimer) clearTimeout(draftTimer);
-    Object.assign(s, blank(), { id, loading: true, editorId: drafts.newEditorId() });
+    Object.assign(s, blank(), { id, loading: true, editorId: drafts.newEditorId(), kind: expected ?? "note" });
+    const noun = expected === "drawing" ? "drawing" : "note";
     try {
       const doc = await api().read(id);
       if (g !== generation) return;
+      if (expected && doc.entry.kind !== expected) {
+        s.wrongKind = true;
+        void router.go(itemPath(doc.entry.kind, id), { replace: true, force: true });
+        return;
+      }
       adopt(doc);
       s.loading = false;
-      s.offered = drafts.forNote(userId(), id, s.editorId);
+      s.offered = drafts.forNote(userId(), id, s.editorId, s.kind);
       if (s.mixed) toasts.push("This note mixes line endings. They will become LF when it is saved.", "warn");
     } catch (e) {
       if (g !== generation) return;
       s.loading = false;
-      s.loadError = e instanceof ApiError ? (e.status === 410 ? "This note is in the trash." : e.status === 404 ? "There is no such note." : e.message) : "The note could not be opened.";
+      s.loadError = e instanceof ApiError ? (e.status === 410 ? `This ${noun} is in the trash.` : e.status === 404 ? `There is no such ${noun}.` : e.message) : `The ${noun} could not be opened.`;
     }
   },
 
@@ -241,9 +341,10 @@ export const editor = {
     }
     if (s.conflict) {
       // The banner holds the choice; Save says so rather than doing nothing (review, 28).
-      toasts.push(s.conflict.kind === "changed" ? "This note was changed elsewhere: choose Keep mine or Take theirs first." : "This note is gone: use Save as a new note to keep your text.", "warn");
+      toasts.push(s.conflict.kind === "changed" ? `This ${what()} was changed elsewhere: choose Keep mine or Take theirs first.` : `This ${what()} is gone: use Save as a new ${what()} to keep your ${drawing() ? "drawing" : "text"}.`, "warn");
       return;
     }
+    if (drawing()) return saveDrawing();
     if (s.mixed && !s.mixedWarned) {
       s.mixedWarned = true;
       toasts.push("The mixed line endings of this note become LF in this save.", "warn");
@@ -295,6 +396,11 @@ export const editor = {
     }
   },
 
+  /** For tests and the drawing screen: whether a save would send anything new. */
+  get baseline(): string {
+    return s.baseline;
+  },
+
   /** 9.5 Keep mine: saves again from the newer revision. */
   async keepMine(): Promise<void> {
     const c = s.conflict;
@@ -334,6 +440,7 @@ export const editor = {
       }
       if (g !== generation) return;
     }
+    if (drawing()) return takeTheirsDrawing(doc, g);
     const mine = serialize(text(), s.eol, s.bom);
     // The person's text is kept as a draft of another editor, so it is offered next time.
     if (drafts.put(uid, id, drafts.newEditorId(), mine, s.base)) {
@@ -355,34 +462,41 @@ export const editor = {
     s.rescued = null;
   },
 
-  /** 4.7: offered when a save meets 410 or 404, and for a draft whose note is gone. */
-  async saveAsNew(textOverride?: string, from?: string): Promise<string | null> {
+  /** 4.7: offered when a save meets 410 or 404, and for a draft whose note is gone. A drawing's
+   *  (SPEC-DRAWINGS 4.5): the open drawing sends its whole file; a draft (`kind` "drawing") sends
+   *  the draft, and the server fills in the images the source has. */
+  async saveAsNew(textOverride?: string, from?: string, kind?: Kind): Promise<string | null> {
     const own = textOverride === undefined;
     if (own) flushView();
-    const t = textOverride ?? serialize(text(), s.eol, s.bom);
+    const k: Kind = own ? s.kind : (kind ?? "note");
+    const noun = k === "drawing" ? "drawing" : "note";
+    const t = textOverride ?? saveText();
+    /** What a draft of the open item holds now, to compare after the request. */
+    const draftNow = () => (k === "drawing" ? draftText() : serialize(text(), s.eol, s.bom));
+    const sent = own ? draftNow() : t;
     const source = from ?? s.id ?? undefined;
     const g = generation;
     const id = s.id;
     const editorId = s.editorId;
     const uid = userId();
     try {
-      const r = await api().saveAsNew(t, source);
+      const r = await api().saveAsNew(t, source, k);
       if (id && own) {
         const d = drafts.get(uid, id, editorId);
         // Text typed while the request was out goes with the new note as its draft, offered
         // when it opens; this editor's draft is removed only once nothing in it is lost.
-        const now = g === generation ? serialize(text(), s.eol, s.bom) : (d?.text ?? t);
-        if (now === t || drafts.put(uid, r.id, drafts.newEditorId(), now, r.revision)) {
+        const now = g === generation ? draftNow() : (d?.text ?? sent);
+        if (now === sent || drafts.put(uid, r.id, drafts.newEditorId(), now, r.revision, Date.now(), k)) {
           if (d) drafts.remove(d.key);
         }
       }
       s.photosMissing = r.photosMissing;
-      if (r.photosMissing) toasts.push("Saved as a new note. Its photos could not be found, so they are missing.", "warn", 8000);
-      else toasts.push("Saved as a new note.", "info");
+      if (r.photosMissing) toasts.push(k === "drawing" ? "Saved as a new drawing. Some of its images could not be found, so they are missing." : "Saved as a new note. Its photos could not be found, so they are missing.", "warn", 8000);
+      else toasts.push(`Saved as a new ${noun}.`, "info");
       void library.refresh();
       return r.id;
     } catch (e) {
-      toasts.push(`Not saved: ${e instanceof Error ? e.message : "the note could not be made"}`, "error");
+      toasts.push(`Not saved: ${e instanceof Error ? e.message : `the ${noun} could not be made`}`, "error");
       return null;
     }
   },
@@ -390,6 +504,7 @@ export const editor = {
   /** 9.5: opening a draft stores it under the current editor id, and takes its base revision. */
   async openDraft(d: Draft): Promise<void> {
     flushView();
+    if (drawing()) return openDrawingDraft(d);
     const t = text();
     if (differs(t)) {
       // Text typed since the note opened would be replaced: ask first, and keep it as another
@@ -429,3 +544,114 @@ export const editor = {
     s.entry = e;
   },
 };
+
+// --- a drawing (SPEC-DRAWINGS 4.3 to 4.5) ------------------------------------------------------
+
+async function saveDrawing(): Promise<void> {
+  const g = generation;
+  const id = s.id!;
+  const editorId = s.editorId;
+  const uid = userId();
+  const sc = scene();
+  const bytes = serializeDrawing(sc, s.nook);
+  const sig = signature(sc);
+  const draftOfSaved = draftText(sc);
+  s.saving = true;
+  s.error = null;
+  try {
+    const r = await api().save(id, bytes, s.base, "drawing");
+    // A late answer for a drawing the person has left only removes that editor's draft.
+    drafts.removeIfSaved(uid, id, editorId, draftOfSaved);
+    if (g !== generation) return;
+    s.base = r.revision;
+    s.saved = bytes;
+    s.baseline = sig;
+    s.entry = r.entry;
+    s.saving = false;
+    editor.changed();
+    if (!unsavedNow()) {
+      const d = drafts.get(uid, id, editorId);
+      if (d) drafts.remove(d.key);
+    }
+    void library.refresh();
+    if (s.queued) {
+      s.queued = false;
+      await editor.save();
+    }
+  } catch (e) {
+    if (g !== generation) return;
+    s.saving = false;
+    s.queued = false;
+    if (e instanceof ApiError && e.status === 409 && e.code === "changed") {
+      s.conflict = { kind: "changed", current: (e.body.current as NoteDoc | undefined) ?? null };
+    } else if (e instanceof ApiError && (e.status === 410 || e.status === 404)) {
+      s.conflict = { kind: "gone", status: e.status };
+    } else if (e instanceof ApiError && e.status === 413) {
+      // 4.4: how large the drawing is, and that nothing was lost.
+      const size = new TextEncoder().encode(bytes).length;
+      s.error = `This drawing is ${(size / MB).toFixed(1)} MB; a drawing may be at most 25 MB. Nothing was lost: remove something from it (an image, say) and save again.`;
+      toasts.push(`Not saved. ${s.error}`, "error", 12000);
+    } else {
+      s.error = e instanceof Error ? e.message : "The drawing could not be saved.";
+      toasts.push(`Not saved: ${s.error}`, "error");
+    }
+  }
+}
+
+/** Take theirs: the person's scene is kept as a draft (4.5), then the newer file is loaded. */
+async function takeTheirsDrawing(doc: NoteDoc, g: number): Promise<void> {
+  const id = s.id!;
+  const uid = userId();
+  const mine = draftText();
+  if (drafts.put(uid, id, drafts.newEditorId(), mine, s.base, Date.now(), "drawing")) {
+    const d = drafts.get(uid, id, s.editorId);
+    if (d) drafts.remove(d.key);
+    toasts.push("Your drawing was kept as a draft; it is offered the next time you open this drawing.", "info", 6000);
+  } else {
+    s.editorId = drafts.newEditorId();
+  }
+  adopt(doc);
+  s.conflict = null;
+  const sc = sceneOf(doc.text);
+  if (view?.load && sc) await view.load(sc);
+  if (g !== generation) return;
+  s.baseline = signature();
+  editor.changed();
+}
+
+/** Opening a draft: the scene from the draft, the image data from the file read from the server
+ *  (4.5). The baseline is left alone, so the drawing is then unsaved. */
+async function openDrawingDraft(d: Draft): Promise<void> {
+  const draft = sceneOf(d.text);
+  if (!draft) {
+    toasts.push("This draft cannot be read.", "error");
+    return;
+  }
+  if (unsavedNow()) {
+    const g = generation;
+    const ok = await toasts.confirm("Open this draft? It replaces what you drew since you opened the drawing; that is kept as a draft.", { ok: "Open the draft" });
+    if (!ok || g !== generation) return;
+    flushView();
+    if (!drafts.put(userId(), s.id!, drafts.newEditorId(), draftText(), s.base, Date.now(), "drawing")) {
+      toasts.push("Your drawing could not be kept as a draft (this browser refuses to store it), so the draft was not opened.", "error");
+      return;
+    }
+  }
+  if (!drafts.adopt(d, s.editorId)) return;
+  const fromServer = sceneOf(s.saved)?.files ?? {};
+  const files: Record<string, unknown> = {};
+  let missing = 0;
+  for (const f of usedFileIds(draft.elements)) {
+    if (fromServer[f] !== undefined) files[f] = fromServer[f];
+    else missing++;
+  }
+  const f = drawingFacts(d.text);
+  s.nook = { ...s.nook, title: f.title, tags: f.tags };
+  s.base = d.base;
+  s.offered = s.offered.filter((x) => x.key !== d.key);
+  const g = generation;
+  if (view?.load) await view.load({ elements: draft.elements, appState: draft.appState, files });
+  if (g !== generation) return;
+  if (missing) toasts.push(`${missing === 1 ? "One image" : `${missing} images`} added after the last save ${missing === 1 ? "is" : "are"} not in the draft, and ${missing === 1 ? "shows" : "show"} as a placeholder.`, "warn", 10000);
+  editor.changed();
+}

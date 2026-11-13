@@ -6,6 +6,8 @@ export type Route =
   | { name: "home" }
   | { name: "note"; id: string }
   | { name: "history"; id: string }
+  | { name: "drawing"; id: string }
+  | { name: "drawingHistory"; id: string }
   | { name: "trash" }
   | { name: "fonts" }
   | { name: "styles" }
@@ -24,6 +26,9 @@ export function match(path: string): Route {
   if (p === "/account") return { name: "account" };
   const n = /^\/n\/([^/]+)(\/history)?$/.exec(p);
   if (n && NOTE_ID.test(n[1])) return n[2] ? { name: "history", id: n[1] } : { name: "note", id: n[1] };
+  // SPEC-DRAWINGS 6: a drawing and its history.
+  const d = /^\/d\/([^/]+)(\/history)?$/.exec(p);
+  if (d && NOTE_ID.test(d[1])) return d[2] ? { name: "drawingHistory", id: d[1] } : { name: "drawing", id: d[1] };
   return { name: "notfound" };
 }
 

@@ -140,3 +140,14 @@ export function drawingSignature(elements: readonly unknown[], appState: Readonl
   const els = elements.filter(isLive).map((e) => [e.id, e.version]);
   return JSON.stringify([els, KEPT_APP_STATE.map((k) => appState[k] ?? null), title, tags]);
 }
+
+/** The scene of a drawing's text for Excalidraw, or null when it is not a drawing. */
+export function sceneOf(text: string): { elements: unknown[]; appState: Record<string, unknown>; files: Record<string, unknown> } | null {
+  const { doc } = parseDrawing(text);
+  if (!doc) return null;
+  return {
+    elements: doc.elements as unknown[],
+    appState: isObject(doc.appState) ? doc.appState : {},
+    files: isObject(doc.files) ? doc.files : {},
+  };
+}

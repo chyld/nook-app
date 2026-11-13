@@ -6,6 +6,8 @@
   import { prefs } from "../stores/prefs.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { router } from "../lib/router.svelte.ts";
+  import { itemPath } from "../stores/editor.svelte.ts";
+  import type { Kind } from "../../../contract/src/index.ts";
   import { tagHue, when } from "../lib/format.ts";
   import Icon from "../components/Icon.svelte";
   import Chip from "../components/Chip.svelte";
@@ -17,18 +19,18 @@
     if (!library.loaded) void library.refresh();
   });
 
-  async function newNote() {
+  async function newItem(kind: Kind) {
     try {
-      const id = await library.create();
+      const id = await library.create(undefined, kind);
       prefs.setSheet(false);
-      await router.go(`/n/${id}`);
+      await router.go(itemPath(kind, id));
     } catch (e) {
-      toasts.push(`The note could not be made: ${e instanceof Error ? e.message : ""}`, "error");
+      toasts.push(`The ${kind} could not be made: ${e instanceof Error ? e.message : ""}`, "error");
     }
   }
-  async function pick(id: string, e: Event) {
+  async function pick(kind: Kind, id: string, e: Event) {
     e.preventDefault();
-    if (await router.go(`/n/${id}`)) prefs.setSheet(false);
+    if (await router.go(itemPath(kind, id))) prefs.setSheet(false);
   }
   const links: [string, string, string, string][] = [
     ["/trash", "Trash", "trash", "nav-trash"],
@@ -43,7 +45,10 @@
     <a class="brand" href="/" onclick={(e) => (e.preventDefault(), router.go("/"))}><Logo size={30} /><span>Nook</span></a>
     <Button variant="icon" data-testid="sidebar-fold" aria-label="Fold the sidebar" title="Fold the sidebar" onclick={onfold}><Icon name="fold" /></Button>
   </div>
-  <Button variant="primary" data-testid="new-note" onclick={newNote}><Icon name="plus" size={16} /> New note</Button>
+  <div class="new">
+    <Button variant="primary" data-testid="new-note" onclick={() => newItem("note")}><Icon name="plus" size={16} /> New note</Button>
+    <Button data-testid="new-drawing" onclick={() => newItem("drawing")}><Icon name="pen" size={16} /> New drawing</Button>
+  </div>
   <label class="search">
     <Icon name="search" size={16} />
     <input type="search" placeholder="Search" aria-label="Search notes" data-testid="search" value={library.search} oninput={(e) => library.setSearch((e.target as HTMLInputElement).value)} />
@@ -58,8 +63,8 @@
   {/if}
   <nav class="list" aria-label="Your notes">
     {#each library.entries as e (e.id)}
-      <a class="row" class:open={e.id === openId} href={`/n/${e.id}`} data-testid="note-row" data-id={e.id} aria-current={e.id === openId ? "page" : undefined} onclick={(ev) => pick(e.id, ev)}>
-        <span class="title">{e.title}</span>
+      <a class="row" class:open={e.id === openId} href={itemPath(e.kind, e.id)} data-testid="note-row" data-id={e.id} data-kind={e.kind} aria-current={e.id === openId ? "page" : undefined} onclick={(ev) => pick(e.kind, e.id, ev)}>
+        <span class="title">{#if e.kind === "drawing"}<span class="pen" title="A drawing"><Icon name="pen" size={14} label="Drawing" /></span>{/if}{e.title}</span>
         <span class="meta">
           <span class="time">{when(e.modified)}</span>
           {#if e.problem}<span class="warn" title={e.problem === "broken" ? "The front matter does not parse" : "Cannot be opened"}><Icon name="warn" size={14} /></span>{/if}
@@ -107,6 +112,17 @@
     font-family: var(--font-display);
     font-weight: 750;
     font-size: var(--text-lg);
+  }
+  .new {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s-2);
+  }
+  .pen {
+    display: inline-block;
+    vertical-align: -0.125em;
+    margin-right: var(--s-1);
+    color: var(--c-sky);
   }
   .search {
     display: flex;

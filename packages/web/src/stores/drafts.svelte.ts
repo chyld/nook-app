@@ -1,9 +1,11 @@
 // SPEC2 9.5: unsaved text in local storage, under user id, note id and a random editor id made
-// when the editor opened; it holds the text, the base revision and the time. A draft never
+// when the editor opened; it holds the text, the base revision, the time and the kind (a note's
+// text, or a drawing's file without its images: SPEC-DRAWINGS 4.5; a draft stored without a
+// kind is a note's). A draft never
 // expires by age. If the browser refuses a write (storage is full), a warning stays on screen
 // until a write succeeds.
 
-import { randomBase32 } from "../../../contract/src/index.ts";
+import { randomBase32, type Kind } from "../../../contract/src/index.ts";
 
 export interface Draft {
   key: string;
@@ -13,6 +15,7 @@ export interface Draft {
   text: string;
   base: string;
   time: number;
+  kind: Kind;
 }
 
 export interface StorageLike {
@@ -44,9 +47,9 @@ function parse(key: string, raw: string | null): Draft | null {
   const [userId, noteId, editorId] = key.slice(PREFIX.length).split(":");
   if (!userId || !noteId || !editorId) return null;
   try {
-    const v = JSON.parse(raw) as { text?: unknown; base?: unknown; time?: unknown };
+    const v = JSON.parse(raw) as { text?: unknown; base?: unknown; time?: unknown; kind?: unknown };
     if (typeof v.text !== "string" || typeof v.base !== "string" || typeof v.time !== "number") return null;
-    return { key, userId, noteId, editorId, text: v.text, base: v.base, time: v.time };
+    return { key, userId, noteId, editorId, text: v.text, base: v.base, time: v.time, kind: v.kind === "drawing" ? "drawing" : "note" };
   } catch {
     return null;
   }
@@ -81,7 +84,7 @@ export const drafts = {
   get version(): number {
     return state.version;
   },
-  put(userId: string, noteId: string, editorId: string, text: string, base: string, time = Date.now()): boolean {
+  put(userId: string, noteId: string, editorId: string, text: string, base: string, time = Date.now(), kind: Kind = "note"): boolean {
     const s = store();
     if (!s) {
       // No storage at all (turned off, or refused by the browser): the same warning as full.
@@ -89,7 +92,7 @@ export const drafts = {
       return false;
     }
     try {
-      s.setItem(keyOf(userId, noteId, editorId), JSON.stringify({ text, base, time }));
+      s.setItem(keyOf(userId, noteId, editorId), JSON.stringify(kind === "note" ? { text, base, time } : { text, base, time, kind }));
       state.full = false;
       state.version++;
       return true;
@@ -126,13 +129,13 @@ export const drafts = {
     }
     return out.sort((a, b) => b.time - a.time);
   },
-  /** Every draft for a note but the current editor's own. */
-  forNote(userId: string, noteId: string, exceptEditor: string): Draft[] {
-    return drafts.list(userId).filter((d) => d.noteId === noteId && d.editorId !== exceptEditor);
+  /** Every draft for a note (or a drawing: `kind`) but the current editor's own. */
+  forNote(userId: string, noteId: string, exceptEditor: string, kind: Kind = "note"): Draft[] {
+    return drafts.list(userId).filter((d) => d.noteId === noteId && d.editorId !== exceptEditor && d.kind === kind);
   },
   /** Opening a draft stores it under the current editor id before the old entry is removed. */
   adopt(d: Draft, editorId: string): boolean {
-    if (!drafts.put(d.userId, d.noteId, editorId, d.text, d.base, d.time)) return false;
+    if (!drafts.put(d.userId, d.noteId, editorId, d.text, d.base, d.time, d.kind)) return false;
     if (d.editorId !== editorId) drafts.remove(d.key);
     return true;
   },

@@ -12,6 +12,7 @@
   import Layout from "./screens/Layout.svelte";
   import TopBar from "./screens/TopBar.svelte";
   import History from "./screens/History.svelte";
+  import DrawingHistory from "./screens/DrawingHistory.svelte";
   import Trash from "./screens/Trash.svelte";
   import Fonts from "./screens/Fonts.svelte";
   import Styles from "./screens/Styles.svelte";
@@ -53,14 +54,16 @@
 {:else if route.name === "login"}
   <Login />
 {:else if session.user}
-  {#if route.name === "home" || route.name === "note"}
+  {#if route.name === "home" || route.name === "note" || route.name === "drawing"}
     <Layout {route} />
   {:else}
     <div class="page">
       <TopBar />
-      <main class="main" class:wide={route.name === "fonts"}>
+      <main class="main" class:wide={route.name === "fonts" || route.name === "drawingHistory"}>
         {#if route.name === "history"}
           <History id={route.id} />
+        {:else if route.name === "drawingHistory"}
+          <DrawingHistory id={route.id} />
         {:else if route.name === "trash"}
           <Trash />
         {:else if route.name === "fonts"}

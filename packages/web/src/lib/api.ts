@@ -1,7 +1,7 @@
 // The browser's API client (SPEC2 6, 9.2), typed from `contract`. Only store actions call it;
 // components never call `fetch`. Tests replace it with a fake (`setClient`).
 
-import { routes, urlOf, type Answer, type JsonBody, type RouteName } from "../../../contract/src/index.ts";
+import { DOCUMENT_TYPE, routes, urlOf, type Answer, type JsonBody, type Kind, type RouteName } from "../../../contract/src/index.ts";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -23,6 +23,8 @@ interface CallOptions {
   query?: Record<string, string | number | undefined>;
   json?: unknown;
   markdown?: string;
+  /** A note's Markdown or a drawing's file, with the type of its kind (SPEC-DRAWINGS 5). */
+  document?: { kind: Kind; text: string };
   form?: FormData;
   headers?: Record<string, string>;
 }
@@ -37,6 +39,9 @@ async function call<N extends RouteName>(name: N, o: CallOptions = {}): Promise<
   if (o.markdown !== undefined) {
     headers["content-type"] = "text/markdown; charset=utf-8";
     body = o.markdown;
+  } else if (o.document !== undefined) {
+    headers["content-type"] = `${DOCUMENT_TYPE[o.document.kind]}; charset=utf-8`;
+    body = o.document.text;
   } else if (o.form) body = o.form;
   else if (o.json !== undefined) {
     headers["content-type"] = "application/json";
@@ -70,10 +75,10 @@ export interface ApiClient {
   me(): Promise<Answer<"me">>;
   password(current: string, next: string): Promise<unknown>;
   list(q: { tag?: string; q?: string }): Promise<Answer<"list">>;
-  create(title?: string): Promise<Answer<"create">>;
-  saveAsNew(text: string, from?: string): Promise<Answer<"create">>;
+  create(title?: string, kind?: Kind): Promise<Answer<"create">>;
+  saveAsNew(text: string, from?: string, kind?: Kind): Promise<Answer<"create">>;
   read(id: string): Promise<Answer<"read">>;
-  save(id: string, text: string, revision: string): Promise<Answer<"save">>;
+  save(id: string, text: string, revision: string, kind?: Kind): Promise<Answer<"save">>;
   trash(id: string): Promise<unknown>;
   history(id: string): Promise<Answer<"history">>;
   version(id: string, version: string): Promise<Answer<"version">>;
@@ -97,10 +102,10 @@ export const httpClient: ApiClient = {
   me: () => call("me"),
   password: (current, next) => call("password", { json: { current, next } }),
   list: (q) => call("list", { query: q }),
-  create: (title) => call("create", { json: title === undefined ? {} : { title } }),
-  saveAsNew: (text, from) => call("create", { markdown: text, query: { from } }),
+  create: (title, kind = "note") => call("create", { json: { ...(title === undefined ? {} : { title }), ...(kind === "note" ? {} : { kind }) } }),
+  saveAsNew: (text, from, kind = "note") => call("create", { document: { kind, text }, query: { from } }),
   read: (id) => call("read", { params: { id } }),
-  save: (id, text, revision) => call("save", { params: { id }, markdown: text, headers: { "if-match": revision } }),
+  save: (id, text, revision, kind = "note") => call("save", { params: { id }, document: { kind, text }, headers: { "if-match": revision } }),
   trash: (id) => call("trash", { params: { id } }),
   history: (id) => call("history", { params: { id } }),
   version: (id, version) => call("version", { params: { id, version } }),

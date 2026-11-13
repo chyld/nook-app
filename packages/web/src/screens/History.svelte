@@ -20,6 +20,10 @@
   $effect(() => {
     void library.loadHistory(id).catch((e) => toasts.push(e.message, "error"));
   });
+  // A drawing's id: its own history screen (SPEC-DRAWINGS 6).
+  $effect(() => {
+    if (library.kindOf(id) === "drawing") void router.go(`/d/${id}/history`, { replace: true, force: true });
+  });
   function pick(v: string) {
     void library.pickVersion(id, v).catch((e) => toasts.push(`This version could not be read: ${e instanceof Error ? e.message : ""}`, "error"));
   }

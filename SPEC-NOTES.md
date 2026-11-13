@@ -365,3 +365,36 @@ Chromium through Playwright (with internet access). Found:
 - The photo upload answers 404 for a drawing once the photo has passed its type check (a file
   that is not an image is still 422 first, as for a note); asset routes answer 404 for a live or
   trashed drawing.
+
+## Section 3 and 6: the browser
+
+- **Ready (4.3)** is: Excalidraw's `appState.isLoading` is false (it turns false in the same
+  update that puts in the initial scene), every image's `data:` URL is decoded, a frame, then
+  `document.fonts.ready`, then a frame. The view registers with the store only then, and the
+  store takes the baseline as it registers.
+- **Take theirs, opening a draft and another version on the history screen** mount Excalidraw
+  again with the new scene (React key), so the new scene goes through exactly the path of
+  opening (Excalidraw's `restore`, its fonts, the same signal of ready); the view position
+  goes back to "scroll to content" each time. While it remounts the view answers with the scene
+  it is loading, so a draft stored meanwhile is never empty.
+- **Take theirs** of a drawing keeps the person's scene as a draft (4.5) and says so in a
+  message; there is no box with the text to copy (a note's "rescued" box would hold JSON).
+- **The library (3.3)** is read into `initialData.libraryItems` and written on
+  `onLibraryChange`, under `nook:library:<user id>`; `useHandleLibrary({ excalidrawAPI })`
+  takes in `#addLibrary=…`. A library is taken in only after Excalidraw's own `window.confirm`,
+  and only from `excalidraw.com` addresses (its default). Library items can also be added the
+  usual way (select, then "Add to library" in the library sidebar).
+- **The title** of a drawing is changed by clicking it, as a note's; an empty title is not
+  taken (the old one stays). Tags are cleaned as a note's.
+- **A wrong-kind address.** `editor.open(id, expected)` leaves `loading` set and goes to the
+  right address with `replace` when the item is of the other kind, so no view is made. The two
+  history screens do the same from the kind the list (or one read) gives.
+- **The history screen of a drawing** uses the page layout, full width, with Excalidraw in view
+  mode in a box 70% of the window high.
+- **Dark mode:** Excalidraw's theme follows `prefers-color-scheme` when the drawing opens, as the
+  app's tokens do. The theme item of Excalidraw's menu is left out, since Nook has no theme
+  setting of its own.
+- **Icons:** the drawing rows and trash rows use a new `pen` icon.
+- The test hook's `addImage(file)` drops the file on the canvas, as a person's drop;
+  `addText(text, x, y)` adds a text element made by Excalidraw's `convertToExcalidrawElements`;
+  `setBackground(colour)` sets `viewBackgroundColor`. Each is one undo step.

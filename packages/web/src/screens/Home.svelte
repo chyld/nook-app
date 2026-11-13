@@ -2,7 +2,7 @@
   // SPEC2 9.1, 9.5: the welcome, and any drafts found. For a note that is gone a draft offers
   // "Save as a new note" or discard.
   import { drafts } from "../stores/drafts.svelte.ts";
-  import { editor } from "../stores/editor.svelte.ts";
+  import { editor, itemPath } from "../stores/editor.svelte.ts";
   import { library } from "../stores/library.svelte.ts";
   import { session } from "../stores/session.svelte.ts";
   import { router } from "../lib/router.svelte.ts";
@@ -19,13 +19,15 @@
   $effect(() => {
     for (const d of found) if (library.noteStatus(d.noteId) === "unknown") void library.lookup(d.noteId);
   });
-  const titleOf = (id: string) => library.titleOf(id) ?? (library.noteStatus(id) === "gone" ? "A note that is gone" : "A note");
+  const noun = (d: (typeof found)[number]) => (d.kind === "drawing" ? "drawing" : "note");
+  const titleOf = (d: (typeof found)[number]) => library.titleOf(d.noteId) ?? (library.noteStatus(d.noteId) === "gone" ? `A ${noun(d)} that is gone` : `A ${noun(d)}`);
 
   async function saveAsNew(d: (typeof found)[number]) {
-    const id = await editor.saveAsNew(d.text, d.noteId);
+    // A drawing's draft goes with ?from=<id>: the server fills in its images (SPEC-DRAWINGS 4.5).
+    const id = await editor.saveAsNew(d.text, d.noteId, d.kind);
     if (id) {
       drafts.remove(d.key);
-      await router.go(`/n/${id}`);
+      await router.go(itemPath(d.kind, id));
     }
   }
 </script>
@@ -44,13 +46,13 @@
       {#each found as d (d.key)}
         <div class="draft" data-testid="draft-row" data-id={d.noteId}>
           <div class="what">
-            <span class="name">{titleOf(d.noteId)}</span>
+            <span class="name">{titleOf(d)}</span>
             <span class="time">Unsaved text from {clock(d.time)}</span>
           </div>
           {#if library.noteStatus(d.noteId) !== "gone"}
-            <Button small variant="primary" data-testid="draft-open" onclick={() => router.go(`/n/${d.noteId}`)}>Open</Button>
+            <Button small variant="primary" data-testid="draft-open" onclick={() => router.go(itemPath(d.kind, d.noteId))}>Open</Button>
           {:else}
-            <Button small variant="primary" data-testid="save-as-new" onclick={() => saveAsNew(d)}>Save as a new note</Button>
+            <Button small variant="primary" data-testid="save-as-new" onclick={() => saveAsNew(d)}>Save as a new {noun(d)}</Button>
           {/if}
           <Button small data-testid="draft-discard" onclick={() => drafts.remove(d.key)}>Discard</Button>
         </div>

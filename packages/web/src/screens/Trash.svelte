@@ -1,6 +1,8 @@
 <script lang="ts">
   // SPEC2 9.1, 4.3: trashed notes: read, restore, empty one or all. Emptying is the only action
-  // that destroys data, and it asks for confirmation.
+  // that destroys data, and it asks for confirmation. A drawing's row says it is a drawing and
+  // has no reader (SPEC-DRAWINGS 6).
+  import Icon from "../components/Icon.svelte";
   import { assetUrl } from "../lib/api.ts";
   import { renderInto } from "../lib/render.ts";
   import { library } from "../stores/library.svelte.ts";
@@ -46,8 +48,12 @@
   {#if library.trashLoaded && library.trashed.length === 0}<p class="empty">The trash is empty.</p>{/if}
   <div class="rows">
     {#each library.trashed as e (e.id)}
-      <div class="row" data-testid="trash-row" data-id={e.id}>
-        <button type="button" class="name" onclick={() => (reading = reading === e.id ? null : e.id)}>{e.title}</button>
+      <div class="row" data-testid="trash-row" data-id={e.id} data-kind={e.kind}>
+        {#if e.kind === "drawing"}
+          <span class="name"><span class="kind"><Icon name="pen" size={14} /> Drawing</span> {e.title}</span>
+        {:else}
+          <button type="button" class="name" onclick={() => (reading = reading === e.id ? null : e.id)}>{e.title}</button>
+        {/if}
         <span class="when">{e.trashed ? new Date(e.trashed).toLocaleString() : ""}</span>
         <Button small data-testid="trash-restore" onclick={() => restore(e.id)}>Restore</Button>
         <Button small variant="quiet" data-testid="trash-empty-one" onclick={() => empty([e.id], `"${e.title}"`)}>Delete</Button>
@@ -98,6 +104,15 @@
     text-align: left;
     font-weight: 600;
     cursor: pointer;
+  }
+  .kind {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+    margin-right: var(--s-1);
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--ink-soft);
   }
   .when {
     font-size: var(--text-sm);

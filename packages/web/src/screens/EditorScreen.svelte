@@ -133,7 +133,8 @@
     };
     window.addEventListener("beforeunload", unload);
     const offCell = onCellChange(refresh);
-    void editor.open(id);
+    // A drawing's address is gone to instead, with no view made (SPEC-DRAWINGS 6).
+    void editor.open(id, "note");
     if (!styles.loaded) void styles.load().catch(() => {});
     return () => {
       window.removeEventListener("beforeunload", unload);
@@ -149,7 +150,7 @@
 
   // The view, once the note is loaded.
   $effect(() => {
-    if (!host || editor.loading || editor.loadError || nv || editor.id !== id) return;
+    if (!host || editor.loading || editor.loadError || nv || editor.id !== id || editor.kind !== "note") return;
     nv = createNoteView({
       parent: host,
       text: editor.loadedText,

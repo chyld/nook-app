@@ -1,6 +1,6 @@
 // SPEC2 9.2: the list of notes, tag counts, the search text and tag filter.
 
-import type { Entry, HistoryEntry, TagCount, TrashEntry } from "../../../contract/src/index.ts";
+import type { Entry, HistoryEntry, Kind, TagCount, TrashEntry } from "../../../contract/src/index.ts";
 import { api, ApiError } from "../lib/api.ts";
 
 const s = $state({ entries: [] as Entry[], tags: [] as TagCount[], search: "", tag: "", loaded: false, error: null as string | null, trash: [] as TrashEntry[], trashLoaded: false, versions: [] as HistoryEntry[], versionsOf: "", picked: null as string | null, pickedText: null as string | null, looked: {} as Record<string, Entry | "gone"> });
@@ -53,6 +53,11 @@ export const library = {
     if (s.loaded && !s.search.trim() && !s.tag) return "gone";
     return "unknown";
   },
+  /** The kind of an item, from the list or a lookup; null when not known. */
+  kindOf(id: string): Kind | null {
+    const e = s.entries.find((x) => x.id === id) ?? s.looked[id];
+    return e && e !== "gone" ? e.kind : null;
+  },
   /** The title of a note, from the list or a lookup. */
   titleOf(id: string): string | null {
     const e = s.entries.find((x) => x.id === id) ?? s.looked[id];
@@ -75,8 +80,8 @@ export const library = {
     s.tag = s.tag === tag ? "" : tag;
     void library.refresh();
   },
-  async create(title?: string): Promise<string> {
-    const r = await api().create(title);
+  async create(title?: string, kind: Kind = "note"): Promise<string> {
+    const r = await api().create(title, kind);
     await library.refresh();
     return r.id;
   },
@@ -145,10 +150,11 @@ export const library = {
       throw e;
     }
   },
-  /** A restore is an ordinary save: the note's current revision, then the old text with it. */
-  async restoreVersion(id: string, text: string): Promise<void> {
+  /** A restore is an ordinary save: the note's current revision, then the old text with it, with
+   *  the item's kind (SPEC-DRAWINGS 6). */
+  async restoreVersion(id: string, text: string, kind: Kind = "note"): Promise<void> {
     const now = await api().read(id);
-    await api().save(id, text, now.revision);
+    await api().save(id, text, now.revision, kind);
     await Promise.all([library.loadHistory(id), library.refresh()]);
   },
 };

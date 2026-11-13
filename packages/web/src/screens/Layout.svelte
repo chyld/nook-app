@@ -8,9 +8,12 @@
   import Sidebar from "./Sidebar.svelte";
   import Home from "./Home.svelte";
   import EditorScreen from "./EditorScreen.svelte";
+  import DrawingScreen from "./DrawingScreen.svelte";
 
   let { route }: { route: Route } = $props();
-  const noteId = $derived(route.name === "note" ? route.id : null);
+  // A note or a drawing (SPEC-DRAWINGS 6): the same layout.
+  const noteId = $derived(route.name === "note" || route.name === "drawing" ? route.id : null);
+  const isDrawing = $derived(route.name === "drawing");
   let narrow = $state(typeof matchMedia !== "undefined" && matchMedia("(max-width: 640px)").matches);
   $effect(() => {
     const mq = matchMedia("(max-width: 640px)");
@@ -45,8 +48,12 @@
   {/if}
   <div class="screen" class:hidden={narrow && noteId === null && showSide} inert={covered}>
     {#if noteId}
-      {#key noteId}
-        <EditorScreen id={noteId} ontoggle={toggleSidebar} />
+      {#key `${route.name}:${noteId}`}
+        {#if isDrawing}
+          <DrawingScreen id={noteId} ontoggle={toggleSidebar} />
+        {:else}
+          <EditorScreen id={noteId} ontoggle={toggleSidebar} />
+        {/if}
       {/key}
     {:else}
       <Home ontoggle={toggleSidebar} sidebarShown={showSide} />
