@@ -1,6 +1,6 @@
 # Nook agents: specification
 
-Draft 1, 2026-11-12. Not built. Not yet reviewed.
+Draft 2, 2026-11-12. Not built. Section 14 says what changed since draft 1.
 
 This document adds an interface for AI agents to the app that `SPEC2.md` and
 `SPEC-DRAWINGS.md` describe. Where it is silent, those documents apply. "SPEC2 4.4" means that
@@ -16,38 +16,39 @@ save that person's notes and drawings over HTTP. It cannot delete anything.
 
 1. **Agents use an HTTP interface,** not the web app's controls.
 2. **Agents create and save notes and drawings. They never delete.**
+3. **A simpler form for drawings is in this version** (section 6): an agent sends a short list
+   of shapes and arrows, and the server makes the Excalidraw file.
 
-### 1.2 Proposed in this draft, for the owner to confirm
+### 1.2 Proposed, for the owner to confirm
 
-Nine AI models were asked what interface an agent would want. Where they agreed, this draft
-follows them; the splits are marked.
+Nine AI models were asked what interface an agent would want, and eight of them then reviewed
+draft 1 against the code. Where they agreed, this draft follows them.
 
-3. **Plain HTTP only.** No command-line tool and no MCP server in this version. Either can be
-   added later as a wrapper that holds no rules of its own. (Seven of nine put HTTP first; two
-   put a command-line tool first; none put MCP first.)
-4. **An agent has its own token,** made by a person in the web app, named, revocable, and tied
+4. **Plain HTTP only.** No command-line tool and no MCP server in this version. Either can be
+   added later as a wrapper that holds no rules of its own.
+5. **An agent has its own token,** made by a person in the web app, named, revocable, and tied
    to that person's space. It is not a password and not a session.
-5. **Agent routes are a separate set** under `/api/agent/v1`. A token works there and nowhere
+6. **Agent routes are a separate set** under `/api/agent/v1`. A token works there and nowhere
    else. A session cookie works everywhere else and not there. The set has no route that
-   deletes, trashes, restores, empties, or touches history, photos, fonts, styles or accounts.
-   "No delete" is this absence, enforced by the server (section 3).
-6. **An agent's saves never push a version a person wrote out of history** (4.3). Without
-   this, an agent that saves 51 times has deleted everything the person had, whatever the
-   routes say. (Four of nine named this as the most likely mistake.)
-7. **Saving is whole-document, as now, plus append for notes** (5.5). No patching. (Eight of
-   nine wanted append or would accept it.)
-8. **Who wrote what is recorded by the server, outside the file** (4.2). The note format and
-   the drawing file do not change. (Five of nine; four would put it in the file.)
-9. **Drawings are sent as ordinary Excalidraw files in this version.** A simpler form that the
-   server turns into a scene is section 9, not built now. (Eight of nine wanted the simpler
-   form; this draft defers it because its cost is not yet known. The owner may move it in.)
+   deletes, trashes, restores, empties, or touches photos, fonts, styles or accounts. "No
+   delete" is this absence, enforced by the server (section 3).
+7. **An agent's request never removes a version a person wrote** (4.3). Agents' versions are
+   kept in a folder of their own with a small limit of their own (10 for a note, 5 for a
+   drawing), and where the server cannot be sure who wrote something, it is a person's.
+8. **Saving is whole-document, as now, plus append for notes** (5.6). No patching.
+9. **Who wrote what is recorded by the server, outside the file** (4.2). The note format and
+   the drawing file do not change.
+10. **An agent can read history** but not restore through it; to undo, it saves the old text.
+11. **Changing or resetting a password revokes that person's tokens,** as it ends their other
+    sessions.
+12. **There are limits on how much agents can write** (3.3), so a runaway agent cannot fill
+    the disk.
 
 ### 1.3 Not in this version
 
-A command-line tool. An MCP server. The simpler drawing form (section 9). Photos added by an
-agent. Reading history or the trash. Patching. Keys that make a repeated create harmless
-(`Idempotency-Key`). Refusing a save because it removes most of a document. Telling the open
-web app that an agent changed something (the person sees it on the next list or save).
+A command-line tool. An MCP server. Photos added or read by an agent. The trash. Patching.
+Keys that make a repeated create harmless (`Idempotency-Key`). Paging of the list. Telling the
+open web app that an agent changed something (the person sees it on the next list or save).
 
 ## 2. Tokens
 
@@ -55,14 +56,20 @@ web app that an agent changed something (the person sees it on the next list or 
 
 - A token is `nook_` followed by 40 characters of lower-case base-32 (200 random bits), made
   with the server's random source.
-- The server keeps only its SHA-256, in `config/agents.json`, written under the accounts lock
-  by SPEC2's rule for `users.json` and kept in memory. A record is
-  `{ id, userId, name, hash, created, used }`: `id` is 16 base-32 characters; `used` is the
-  time of the last request, written at most once an hour.
-- **The name** is 1 to 40 characters with no control characters (the pattern of a style's
-  name), trimmed, and unique among one person's tokens, compared without case.
+- The server keeps only its SHA-256, in `config/agents.json` (`DataLayout.agentsFile`),
+  written under the accounts lock by SPEC2's rule for `users.json` and kept in memory. A
+  record is `{ id, userId, name, hash, created, used }`: `id` is 16 base-32 characters;
+  `created` is an ISO date-time; `used` is the ISO date-time of the last request or `null`,
+  written at most once an hour.
+- **The name** is trimmed first, then must be 1 to 40 characters with no control characters
+  (`PATTERNS.styleName`), and unique among one person's tokens, compared without case.
 - A person may have at most 20 tokens (`LIMITS.agents`).
-- Removing a user removes that user's tokens. Changing a password does not.
+- **A token is good only while its user exists.** Looking a token up also looks the user up
+  (`byId`), as a session does.
+- **Removing a user** removes that user's tokens first and writes `agents.json`, then removes
+  the user as now. A crash between the two leaves a user without tokens.
+- **Changing a password and `reset-password`** remove all that user's tokens, in the same
+  locked step that ends the sessions. The Account screen says so before the change.
 - `config/` is already in the backup, so the hashes are.
 
 ### 2.2 Making and revoking, in the web app
@@ -72,7 +79,7 @@ Three routes for the browser, with a session and the `Origin` check as every oth
 | Route | Body | Answer |
 |---|---|---|
 | `GET /api/agents` | none | `{ agents: [{ id, name, created, used }] }` |
-| `POST /api/agents` | `{ name }` | 201 `{ agent, token }`; 409 for a name in use; 422 at the limit of 20 |
+| `POST /api/agents` | `{ name }` | 201 `{ agent, token }`; 409 `name-taken`; 409 `limit` at 20; 400 for a bad name |
 | `DELETE /api/agents/:id` | none | `{}`; 404 for another person's or none |
 
 The token is in the answer to `POST` once and is never shown again.
@@ -82,208 +89,381 @@ a field and a button to make one, and **Revoke** on each row, which asks first. 
 one, the screen shows the token with a **Copy** button, the address of the guide (5.1) and a
 line saying it will not be shown again; it stays until the person closes it.
 
-## 3. The agent routes and "no delete"
+## 3. The boundary
 
-- **A separate set.** Every agent route's address begins `/api/agent/v1/`. They are listed in
-  `contract` with `agent: true`; every other route has `agent: false`.
-- **Authentication.** An agent route reads `Authorization: Bearer <token>`. A missing or
-  malformed header, or a token whose hash is not in the table, is 401 with the code
-  `no-token` and a hint naming the guide's address. Cookies are not looked at. The user is the
-  token's.
-- **The `Origin` check does not apply to an agent route** (a program sends none, and no
-  browser sends the token by itself). It applies to every other route as now.
-- **A token is not a session.** The `preHandler` of every other route looks only at the
-  cookie, so a request with a token and no cookie is 401 there, as now.
-- **A session is not a token.** An agent route does not accept a cookie.
-- **No route in the set deletes.** The set is exactly section 5. It has no `DELETE` method.
-- **Tests hold this** (section 8): for every route of `contract` that is not an agent route,
-  a request with a good token and no cookie is 401 and changes nothing on disk; no agent
-  route has the method `DELETE`; `DELETE` on every agent address is 404 or 405.
-- **A limit on changes.** One token may make at most 60 changing requests in any minute
-  (`LIMITS.agentChanges`), counted in memory; beyond that, 429 with a hint saying when to try
-  again. Reading is not limited.
+### 3.1 Three ways to be let in
+
+`RouteDef.auth` changes from a boolean to `"session" | "token" | "none"`, and `app.ts` passes
+it to each route's config.
+
+- `"none"`: login and the guide (5.1). No check.
+- `"session"`: every route that has `auth: true` today. The `preHandler` looks only at the
+  cookie. A request with a token and no cookie is 401, as now.
+- `"token"`: every route of section 5 but the guide. The `preHandler` reads
+  `Authorization: Bearer <token>` and never the cookie. A missing or malformed header, a
+  token whose hash is not in the table, or one whose user is gone, is 401 `no-token` with a
+  hint naming the guide's address. The user is the token's.
+
+### 3.2 The `/api/agent/` addresses
+
+- **The `Origin` check does not apply** to a request whose path begins `/api/agent/`, whether
+  or not a route matches (a program sends no `Origin`, and no browser sends the token by
+  itself). It applies to every other request as now.
+- **An address or method under `/api/agent/` that is no route** is 404 `not-found` with a hint
+  naming the guide, from the not-found handler, never 403 or 405.
+- **No route in the set deletes.** The set is exactly section 5. None has the method
+  `DELETE`.
 - The body-type check of `onRequest`, the 64 KB limit on JSON, the response headers and the
-  log line apply to agent routes as to others. The log never holds a token.
+  log line apply as to other routes. The log never holds a token.
+
+### 3.3 Limits on what agents write
+
+Counted per person, across all that person's tokens, in memory (a restart clears the counts):
+
+- at most 60 changing requests in any minute (`LIMITS.agentChanges`);
+- at most 300 MB of request bodies in any 24 hours (`LIMITS.agentBytesPerDay`).
+
+Beyond either, 429 `busy` with a hint saying when to try again. Reading is not limited.
+
+**A save that empties.** An agent's save or create is 422 `empty` when the note's text after
+its front matter is only white space, or when a drawing that has elements would be left with
+none. (An empty note can still be made by create with no body, 5.5.)
+
+**A save that drops images.** An agent's save of a drawing is 422 `missing-image`, naming the
+file id, when an image element that is not deleted names a file that `files` does not hold.
+
+### 3.4 Tests that hold the boundary
+
+For every route with `auth: "session"`: a request that is otherwise valid (a good `Origin`, a
+valid body) with a good token and no cookie is 401, and nothing on disk changes. For every
+route with `auth: "token"`: a good cookie without a token is 401. No route under
+`/api/agent/` has the method `DELETE`; `DELETE` on each agent address, with no `Origin` and
+with a foreign one, is 404. A token reaches only its own person's items.
 
 ## 4. Who wrote what
 
 ### 4.1 What a person sees
 
-- `Entry` gains `agent: string | null`: the name of the agent whose request wrote the file as
-  it is now, or `null` when a person's did. `HistoryEntry` gains the same for the text that
-  version holds.
-- The name is copied when the write is made. Revoking or renaming nothing changes it.
+- `Entry` gains `agent: string | null`: the name of the agent whose request wrote the main
+  file as it is now, or `null`. `HistoryEntry` gains `agent: string | null` likewise for the
+  text that version holds. (`TrashEntry` does not change.)
+- The name is copied when the write is made; revoking the token later does not change it.
 - **Sidebar:** a row whose `agent` is not null shows a small mark beside the time, with the
   name as its title.
-- **Editor and drawing screens:** the header says "Written by *name*" beside the save status
-  until a person saves.
+- **Editor and drawing screens:** the header says "Written by *name*" beside the save status.
 - **History screens:** a version an agent wrote says so, with the name.
-- When a person saves, `agent` becomes `null`. When a person restores a version, the result
-  is the person's.
+- When a person's save changes the file, `agent` becomes `null`. A person's save of the same
+  bytes writes nothing (SPEC2 4.4, step 4) and the mark stays: the bytes are still the
+  agent's. A person's restore of a version is a person's save.
 
 ### 4.2 Where it is kept
 
-A file `writers.json` in the item's folder, beside the main file:
+Two things in the item's folder:
 
-```json
-{ "current": "claude on the laptop", "versions": { "2026-11-12T20-15-04.120Z-ab2c": "claude on the laptop" } }
+```
+users/<user-id>/notes/<id>/
+  note.md
+  history/<version>.md             a person's versions, as now
+  agent-history/<version>.md       agents' versions
+  writers.json
 ```
 
-- `current` is the agent that wrote the main file, or `null`. `versions` names the agent for
-  each history version an agent wrote; a version not named was a person's.
-- A folder without the file is all a person's. The file is made by the first agent write.
-- It moves with the folder to the trash and back, and into the backup, with no new step.
-- `layout.ts`: `NotePart` gains `"writers.json"`.
-- A file that is not valid JSON of this shape is read as absent and replaced by the next save.
+- **`agent-history/`** holds the versions whose text an agent wrote. Which folder a version
+  is in is the only thing that decides whether a request may remove it (4.3).
+- **`writers.json`** is
+  `{ "current": { "agent": "claude on the laptop", "revision": "<sha-256>" } | null, "versions": { "<version>": "<name>" } }`.
+  `current` says who wrote the main file, and counts only while `revision` equals the
+  revision of the main file's bytes. `versions` gives the name for each file in
+  `agent-history/`.
+- **Whatever cannot be shown to be an agent's is a person's.** The main file is a person's
+  when `current` is null, when its `revision` does not match (a hand edit, SPEC2 4.5, or a
+  crash), or when `writers.json` is missing or not valid JSON of this shape. A version in
+  `agent-history/` without a name in `versions` is shown as written by "an agent".
+- Both move with the folder to the trash and back, and into the backup, with no new step.
+- `layout.ts`: `NotePart` gains `"writers.json"` and `"agent-history"`, and a version part
+  becomes `{ version, kind, agent: boolean }`; `notePath` handles each (the two names join
+  its list of literal parts).
+- The index reads `writers.json` whenever it reads the main file.
 
 ### 4.3 Saving, with a writer
 
-SPEC2 4.4's steps, with these changes. They apply to every save, by a person or an agent,
-because a person's save must also move `current` into `versions`.
+SPEC2 4.4's steps, for every save (a person's too), with these changes. "The old text is an
+agent's" means `current` counts (4.2) for the bytes read in step 2.
 
-- **Step 5** (the old bytes go to history as version *v*): unchanged.
-- **Step 6** (replace the main file): unchanged.
-- **Step 6a, new:** `writers.json` is replaced, by rule 3: `versions[v]` is the old `current`
-  if it was not null; `current` is the name of the agent saving, or `null` for a person.
-- **Step 7** (old history goes) becomes: the versions are split into those in `versions` (an
-  agent's) and the rest (a person's). **Each group keeps its newest 50** (20 for a drawing),
-  and the oldest beyond that go. The names of removed versions leave `writers.json`.
+- **Step 5:** the old bytes go to a new version *v*, in `agent-history/` if the old text is
+  an agent's, in `history/` otherwise. *v* must be a name in neither folder.
+- **Step 5a, new:** `writers.json` is replaced by rule 3. `versions[v]` is the old agent's
+  name if the old text was an agent's. `current` is `{ agent, revision }` of the bytes about
+  to be written when an agent is saving, or `null` for a person.
+- **Step 6:** the main file is replaced, as now.
+- **Step 7** becomes:
+  - **An agent's request** removes the oldest files of `agent-history/` beyond the newest 10
+    (`LIMITS.agentHistory`; 5 for a drawing, `LIMITS.agentDrawingHistory`). It removes
+    nothing from `history/`, ever.
+  - **A person's request** does that, and also removes the oldest files of `history/` beyond
+    the newest 50 (20 for a drawing), as now.
+  - The names of removed agents' versions leave `versions` in one more write of
+    `writers.json`; a crash before it leaves names without files, which are ignored.
 
-So an agent's saves can remove only agents' versions, and a person's history is what it would
-have been had the agent never run, except for one thing: the first agent save after a
-person's puts the person's text into history as a person's version, exactly as the person's
-own next save would have.
+What follows:
 
-A crash between steps 6 and 6a leaves the main file new and `writers.json` old: one version
-is named for the wrong writer. Nothing is lost, and this is accepted. A create writes
-`writers.json` before the folder is moved into place, so a created item is never wrong.
+- An agent's first save after a person's puts the person's text into `history/` and removes
+  nothing, so `history/` can hold 51 (21) until the person's next save. That next save
+  removes the oldest, exactly as the person's own save would have had the agent never run.
+- **Every crash errs toward a person.** After step 5a and before step 6, `current.revision`
+  does not match the main file, so the main file counts as a person's. An agent's text can be
+  taken for a person's (and so kept longer); a person's is never taken for an agent's.
+- A create by an agent writes `writers.json` in the new folder before the folder is moved
+  into place.
 
-On disk an item can now hold twice the history it could: for a drawing, 40 versions of up to
-25 MB.
+History routes list both folders together, newest first; a version is read from whichever
+folder holds it.
+
+On disk a note can now hold 60 versions and a drawing 25 (of up to 25 MB each).
 
 ## 5. The interface
 
 All addresses below are under `/api/agent/v1`. Answers are JSON unless said. "Item" means a
-note or a drawing.
+note or a drawing. Every answer that describes one item has `url`: the item's page in the web
+app (`/n/<id>` or `/d/<id>`), for the agent to give its person.
+
+**The server's own address,** in `url` and in the guide, is the scheme and `Host` of the
+request itself, read as the `Origin` check reads them. Nook answers on more than one address
+(a name, an IP address), and this gives back the one the agent used.
 
 ### 5.1 The guide: `GET /api/agent/v1`
 
-No token needed. It answers `text/markdown`: a page an agent can read once and work from,
-written for this server (its own address in every example). It holds:
+`auth: "none"`. It answers `text/markdown`: a page an agent can read once and work from, with
+this server's address in every example. It holds:
 
 - what an item is, the two kinds and their body types, the limits (2 MB, 25 MB), the tag
-  pattern, the id pattern;
+  pattern (so `meeting-notes` and `2026` are not tags), the id pattern;
 - each route of this section with one `curl` example and its answer;
 - how to change a note: read, edit the text, save with the revision; what to do on 409;
-- a complete small note, and a complete small drawing (a rectangle, a text and an arrow bound
-  to both) that opens in Nook;
-- every error code of 5.7 with what to do about it;
+- that append without `If-Match` must not be sent again blindly when its answer is lost:
+  read the note and look first, or use `If-Match`;
+- how to undo: read history, and save the old text;
+- for drawings: use the short form (section 6) to make one; to change one, read it, change
+  the JSON, and save all of it, `files` included, or its images are refused as missing;
+- that a note's photos are lines such as `![](note.assets/…)`, which an agent keeps as they
+  are and cannot open;
+- a complete small note, a complete short-form drawing, and a complete Excalidraw drawing;
+- every error code of 5.8 with what to do about it;
 - what a token cannot do, said plainly, so an agent does not go looking: delete, trash,
-  restore, history, photos.
+  restore, photos.
 
 The page's text is one file in the repository, `packages/server/src/agent-guide.md`, with the
 address filled in when it is served. A test runs every `curl` example in it against a real
-server.
+server, and an `e2e` case opens both example drawings in the browser.
 
 ### 5.2 List and search: `GET /items?tag=&q=`
 
-As `GET /api/notes`: `{ entries, tags }`, both kinds, newest first, with `agent` in each entry.
+As `GET /api/notes`: `{ entries, tags }`, both kinds, newest first, with `agent` in each
+entry.
 
-### 5.3 Read: `GET /items/:id`
+### 5.3 Read: `GET /items/:id` and `GET /items/:id/text`
 
-As `GET /api/notes/:id`: `{ text, revision, entry }`. `text` is the whole file: for a note the
-Markdown with its front matter; for a drawing the Excalidraw JSON.
+- `GET /items/:id` answers `{ text, revision, entry, url }`. `text` is the whole file: for a
+  note the Markdown with its front matter; for a drawing the Excalidraw JSON.
+- `GET /items/:id/text` answers the file's bytes themselves, with the type of its kind and
+  `ETag: "<revision>"`, so that `curl -o` gives a file to edit and send back.
 
-### 5.4 Create: `POST /items?title=&tags=`
+A file that is not valid UTF-8 is 422 `not-utf8`, as now.
+
+### 5.4 History: `GET /items/:id/history` and `GET /items/:id/history/:version`
+
+As the browser's two routes: `{ versions }` with `agent` in each, and `{ text }`. Reading
+only. There is no restore: to bring a version back, the agent saves its text (5.6).
+
+### 5.5 Create: `POST /items?title=&tags=`
+
+A route of its own (the browser's `POST /api/notes` is not reused: no JSON form, no `from`).
 
 - The body is the document, with the type of its kind: `text/markdown` for a note,
-  `application/vnd.excalidraw+json` for a drawing. An empty body with `text/markdown` makes
-  an empty note. There is no JSON form and no `from`.
-- `title` is up to 300 characters. `tags` is a list separated by commas; each must match the
-  tag pattern, or the request is 422 naming the tag (an agent's tags are not cleaned for it).
-- **A note whose body does not begin with front matter:** the server writes the front matter
-  (`title`, or `Untitled N` by SPEC2 4.3; `tags` if given; `created`, today) before the body.
-- **A drawing without a `nook` key:** the server adds it likewise, and writes the file in the
-  form of DRAWINGS 4.2.
-- **A body that has its own front matter or `nook` key** is stored as sent, and `title` or
-  `tags` in the address is then 400 with a hint to put them in the document.
-- The body is checked as a save of that kind is. The answer is 201
-  `{ id, revision, entry, text, url }`, where `url` is the item's address in the web app for
-  the agent to give its person.
+  `application/vnd.excalidraw+json` for a drawing, or the short form of section 6. A request
+  with `text/markdown` and no body makes an empty note.
+- `title`, if given and not empty, is trimmed and must be at most 300 characters with no
+  control characters, or the request is 422 `bad-title`. `tags` is a list separated by
+  commas; empty parts and repeats are dropped; each other part must match the tag pattern, or
+  the request is 422 `bad-tag` naming it.
+- **A note.** The body is first checked as a save is (so broken front matter is 422
+  `broken-front-matter`). "Has front matter" means `parseNote(text).frontMatter` is not
+  null.
+  - Without front matter: the server puts front matter before the body: `title` if given,
+    `tags` if given, `created` (today). With no `title` none is written, and the note's title
+    is its first heading by the rules it has now.
+  - With front matter: stored as sent; `title` or `tags` in the address is then 400 with a
+    hint to put them in the document.
+- **A drawing.** Without a `nook` key the server parses the JSON, adds
+  `nook: { title, tags, created }` (`title` is `Untitled N` by SPEC2 4.3 when none is given),
+  and writes the object with a two-space indent, its other keys and their order as sent.
+  With a `nook` key of any shape it is stored as sent, and `title` or `tags` in the address
+  is 400.
+- This is the one place the server writes bytes other than those sent (SPEC2 4.4 and
+  DRAWINGS 4.2 say it never does, of a save; that stays true of a save).
+- The size limit of the kind is checked again on the bytes to be written.
+- The answer is 201 `{ id, revision, entry, text, url }`.
 
-### 5.5 Save and append
+### 5.6 Save and append
 
-**`PUT /items/:id`** is SPEC2 4.4 as changed by 4.3: the whole document, `If-Match` with the
-revision, the type of the item's kind. Its refusals are those of `PUT /api/notes/:id`; the
-409 carries `current` (`text`, `revision`, `entry`) so the agent can merge and send again.
-Without `If-Match` the answer is 428 with a hint (not 400).
+**`PUT /items/:id`** is SPEC2 4.4 as changed by 4.3: the whole document, the type of the
+item's kind, `If-Match` with the revision.
 
-**`POST /items/:id/append`**, notes only (a drawing is 415):
+- The route declares no header schema. The handler takes `If-Match` with or without quotes;
+  when it is missing the answer is 428 `no-revision`; when it is not 64 hex characters, 400.
+- Its other refusals are those of `PUT /api/notes/:id`, and 3.3's. The 409 carries `current`
+  (`text`, `revision`, `entry`) so the agent can merge and send again.
+- The answer is `{ revision, entry, url }`.
 
-- The body is `text/markdown`, not empty, and is added at the end of the note: if the note
-  does not end with a line break one is added, then one empty line, then the body, then a
-  line break if the body has none. The note's own line endings are used.
-- `If-Match` is optional. Without it the append is made to whatever the note holds now; the
-  user's lock (SPEC2's rule 2) makes that safe. With it, a stale revision is 409.
-- It is a save in every other way: the size limit, the history step, the writer, the answer
-  `{ revision, entry }`.
+**`POST /items/:id/append`**, notes only (a drawing is 415). One function, `space.append`,
+does all of it inside one `space.run`, so nothing can come between its read and its write:
 
-### 5.6 What is not here
+- The body is `text/markdown`. An empty body, or one of only white space, is 422 `empty`.
+- The line ending is the note's first one, or LF when it has none; the body's line endings
+  are changed to it. A byte order mark at the start of the note stays; one at the start of
+  the body is dropped.
+- The note's trailing white space and line endings are removed; then, unless nothing is left
+  after the front matter, one empty line; then the body with its trailing line endings
+  removed; then one line ending. So there is exactly one empty line between what was there
+  and what was added.
+- `If-Match` is optional. With it, a stale revision is 409.
+- The result is then a save in every way: checked as a save is (so a note whose front matter
+  is already broken is 422 `broken-front-matter`, with a hint that a person must mend it),
+  the size limit on the whole result, the history step, the writer, the answer of `PUT`.
 
-Any other method or address under `/api/agent/` is 404 with the code `not-found` and a hint
-naming the guide. In particular there is no way to trash, to read or restore history, to add a
-photo, or to see another person's items.
+### 5.7 What is not here
 
-An item in the trash is 410 on read, save and append, with a hint that a person moved it to
-the trash and only a person can bring it back.
+There is no way to trash, to restore, to add or read a photo, or to see another person's
+items. An item in the trash is 410 on every route of this section, with a hint that a person
+moved it to the trash and only a person can bring it back.
 
-### 5.7 Errors
+### 5.8 Errors
 
-An error on an agent route is the existing body with one more value:
+An error on a request under `/api/agent/` is the existing body with `hint` inside `error`:
 
 ```json
 { "error": { "code": "changed", "message": "The note was changed since you opened it.", "hint": "Read the item again, apply your change to the new text, and save with the new revision." } }
 ```
 
-`hint` says what to do next, in one or two sentences, and names the exact value at fault where
-there is one (the tag, the header, the size and the limit). Every refusal of an agent route
-has one. The codes:
+`HttpError` gains a hint; the error handler, the not-found handler and the body-type check of
+`onRequest` put one on every answer under `/api/agent/` with status 400 or above. A hint says
+what to do next in one or two sentences and names the value at fault where the server knows
+it (the tag, the header, the size and the limit, the JSON path of a schema error). Where it
+does not, the hint is a general one for that status.
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `bad-request` | The address or its values are wrong |
-| 401 | `no-token` | No token, or one that is not known |
-| 404 | `not-found` | No such item, or no such route |
+| 400 | `bad-request` | The address, a header or a value is wrong; a JSON body that does not match |
+| 401 | `no-token` | No token, an unknown one, or one whose user is gone |
+| 404 | `not-found` | No such item, version or route |
 | 409 | `changed` | The revision is stale |
 | 410 | `trashed` | The item is in the trash |
-| 413 | `too-large` | Over the kind's limit; says the size and the limit |
-| 415 | `unsupported-type` | The body type is not the item's kind, or append on a drawing |
-| 422 | `refused`, `bad-tag`, `not-utf8`, `not-json`, `not-excalidraw` | The document or a value is not acceptable |
+| 413 | `too-large` | Over the kind's limit, or the route's; says the size and the limit |
+| 415 | `unsupported-type` | No body type, one that is not the item's kind, or append on a drawing |
+| 422 | `refused`, `not-utf8`, `not-json`, `not-excalidraw`, `broken-front-matter` | As a save in the browser |
+| 422 | `bad-tag`, `bad-title`, `empty`, `missing-image`, `bad-sketch` | 5.5, 3.3, section 6 |
 | 428 | `no-revision` | A save without `If-Match` |
-| 429 | `busy` | Over the limit on changes |
+| 429 | `busy` | Over a limit of 3.3 |
+| 500, 503 | `server`, `unavailable` | Nothing is known to have been saved: read before sending again |
 
-## 6. Contract and server
+The most common mistake, `curl -d` with no `Content-Type`, is the 415, and its hint names the
+three types.
 
-- `contract`: `LIMITS.agents` (20), `LIMITS.agentChanges` (60), `PATTERNS.agentToken`,
-  `Agent` (`id`, `name`, `created`, `used`), `agent` in `Entry`, `TrashEntry` and
-  `HistoryEntry`, the routes of 2.2 and of section 5, and `agent: boolean` on every route.
-  `ErrorBody` allows `hint`.
-- `accounts.ts` (or a new `agents.ts` beside it): the table, making, revoking, looking a
-  token up by its hash in constant time, the hourly `used`, removal with the user.
-- `app.ts`: `onRequest` skips the `Origin` check for a route with `agent: true`;
-  `preHandler` authenticates such a route by token and every other by cookie, never both;
-  the handlers of section 5 call the same `space` functions the browser's routes do, with the
-  writer's name; the error handler adds the hint on agent routes.
-- `space.ts`: `save`, `create` and `saveAsNew` take a writer (`string | null`); the new step
-  6a and the new step 7; `append`; `agent` in the index's facts, in `entryOf`, in `history`
-  and in the trash entry. `layout.ts` as in 4.2.
-- `core`: a function that puts front matter before a note's body from a title and tags (using
-  `fmwriter`), and one that adds `nook` to a drawing, both pure and tested.
+## 6. The short form for drawings
 
-## 7. The web app
+An agent writing Excalidraw by hand gets the many values of each element subtly wrong. The
+short form is a third body type for create, `application/vnd.nook.sketch+json`, which the
+server turns into an ordinary `drawing.excalidraw`. It is for making a drawing only: reading
+always gives the Excalidraw file, and a save takes only that.
 
-- Account screen: the Agents section of 2.2.
+### 6.1 The form
+
+```json
+{ "shapes": [ { "id": "a", "type": "rectangle", "x": 0, "y": 0, "label": "Browser" },
+              { "id": "b", "type": "rectangle", "x": 320, "y": 0, "label": "Server", "fill": "yellow" },
+              { "type": "text", "x": 0, "y": 120, "label": "One save, whole document" } ],
+  "arrows": [ { "from": "a", "to": "b", "label": "PUT" } ] }
+```
+
+- **A shape** has `type` (`rectangle`, `ellipse`, `diamond` or `text`), `x` and `y` (its top
+  left, in pixels, y downward), and optionally `id`, `width`, `height`, `label`, `color` (its
+  line and text), `fill`. A `text` must have a `label`. Without `width` and `height` a shape
+  is 160 by 60, made larger if its label needs it.
+- **An arrow** has `from` and `to`, each the `id` of a shape, and optionally `label` and
+  `color`. It is drawn straight, from the edge of one shape to the edge of the other along
+  the line between their centres, and bound to both, so it follows when a person moves them.
+- **A colour** is one of `black`, `gray`, `red`, `orange`, `yellow`, `green`, `blue`,
+  `violet`, or `#rrggbb`.
+- **Limits:** at most 500 shapes and 1000 arrows; a label at most 500 characters; numbers
+  finite and within ±100000; ids unique, 1 to 40 characters of `A-Z a-z 0-9 _ -`. The JSON
+  limit of 64 KB does not apply to this type; the route's does.
+- Anything else (an unknown key, a `from` that names no shape, an arrow from a shape to
+  itself) is 422 `bad-sketch`, with the JSON path and the reason in the hint.
+- `title` and `tags` come from the address, as in 5.5.
+
+### 6.2 The converter
+
+Excalidraw's own converter for such lists (`convertToExcalidrawElements`) cannot be used on
+the server: the package does not load in Node (checked on 2026-11-12 with 0.18.1: its import
+fails before any code runs). So `packages/core/src/sketch.ts` holds Nook's own, pure and
+tested in Node:
+
+- `sketchProblem(value)` gives the first fault and its path, or null.
+- `sketchToDrawing(sketch, nook, random)` gives the text of a `drawing.excalidraw` in the
+  form of DRAWINGS 4.2: every element with the values the pinned Excalidraw writes for its
+  type; a label in a shape as a text element bound to it and centred; an arrow with its two
+  bindings and each shape naming the arrow; ids, seeds and nonces from `random`.
+- **Text is sized by estimate** (the server has no fonts): a width from the count of
+  characters in the longest line, a height from the count of lines.
+- The file is marked `nook.sketch: true`.
+
+### 6.3 Opening one
+
+When the drawing screen opens a file with `nook.sketch: true`, it passes the elements through
+Excalidraw's `restoreElements` with `refreshDimensions` and `repairBindings` on before giving
+them to the component, so every text is measured with the real font and every label sits in
+its shape. This happens before the baseline of DRAWINGS 4.3 is taken, so the drawing does not
+open unsaved. A person's first save writes the measured sizes; `serializeDrawing` writes only
+`title`, `tags` and `created` into `nook`, so the mark goes with that save.
+
+Until a person saves it, the file holds the estimated sizes: in excalidraw.com, or in the
+history screen's view, labels may sit a little off. This is accepted.
+
+### 6.4 First step: see it work
+
+Before the rest of section 6 is built, the builder writes the converter for one rectangle
+with a label, one text and one arrow, and opens the result in the real drawing screen. The
+builder checks, and records in `SPEC-NOTES.md`: that the shapes, the labels and the arrow
+show where they should; that moving a shape moves its arrow and its label; that the drawing
+opens not unsaved, and after a save and a reload is unchanged; which element values
+Excalidraw's `restore` fills in when they are left out, so the converter need not write them.
+If `restoreElements` cannot do what 6.3 says, the estimate is made closer and 6.3 is dropped.
+
+## 7. Contract and server
+
+- `contract`: `auth` as in 3.1 on every route; `LIMITS.agents` (20), `agentChanges` (60),
+  `agentBytesPerDay` (300 MB), `agentHistory` (10), `agentDrawingHistory` (5), and the limits
+  of 6.1; `PATTERNS.agentToken`; `SKETCH_TYPE`; `Agent`; `agent` in `Entry` and
+  `HistoryEntry`; the routes of 2.2 and of section 5; `ErrorBody` allows `error.hint`.
+- `errors.ts`: `HttpError` takes a hint and puts it in `error`; `CODES` gains 428.
+- A new `agents.ts` beside `accounts.ts`: the table, making, revoking, lookup by hash with
+  the user check, the hourly `used`, removal with the user and with a password change; the
+  counts of 3.3.
+- `app.ts`: 3.1 and 3.2 in `onRequest`, `preHandler` and the not-found handler; a parser for
+  the short form's type that keeps the raw bytes; the handlers of section 5, which call the
+  same `space` functions the browser's routes do, with the writer's name.
+- `space.ts`: `save`, `saveAsNew` and `create` take a writer (`string | null`); 4.3;
+  `append`; the checks of 3.3; `agent` in the index's facts, `entryOf` and `history`;
+  `history` and `version` over both folders. `layout.ts` as in 4.2.
+- `core`: `newNoteText` and `yamlQuote` move here from `space.ts` and gain tags (`fmwriter`
+  cannot write `created`, so it is not used); a function that adds `nook` to a drawing's JSON
+  as 5.5 says; `sketch.ts`.
+
+## 8. The web app
+
+- Account screen: the Agents section of 2.2, and the line about passwords of 2.1.
 - Sidebar, editor header, drawing header, the two history screens: 4.1.
+- Drawing screen: 6.3.
 - The API client gains the three routes of 2.2. Nothing else in the stores changes: an
   agent's save reaches an open note as another tab's would, as a 409 on the person's next
   save, with **Keep mine** and **Take theirs**.
@@ -291,77 +471,94 @@ has one. The codes:
   `agent-revoke`; `written-by` on the two headers; `note-row` and `history-row` gain
   `data-agent` (the name, or absent).
 
-## 8. Tests the builders write
+## 9. Tests the builders write
 
 | Level | What |
 |---|---|
-| `core` | Front matter put before a body: with and without a title and tags, a body that already has front matter. `nook` added to a drawing. |
-| `server`, tokens | Make, list, revoke; the name's rules and the limit of 20; a revoked token is 401 at once; one person cannot see or revoke another's; removing a user removes the tokens; the token is in no log line and only its hash is on disk. |
-| `server`, the boundary | For every non-agent route of `contract`: a good token without a cookie is 401 and nothing on disk changes. For every agent route: a good cookie without a token is 401. No agent route has `DELETE`; `DELETE` on each agent address is 404 or 405. A token reaches only its own person's items. An agent route works with no `Origin` and with a foreign one. |
-| `server`, the interface | List, read, create of each kind with and without `title` and `tags`, each refusal of 5.7 with its hint, save, 409 with `current`, 428, append with and without `If-Match`, append's line breaks for LF and CRLF notes, 410 for a trashed item, 429 at the limit. Every `curl` example of the guide. |
-| `server`, writers | `agent` in entries and history after each mix of person and agent saves. **51 agent saves of a note a person saved 50 times leave all 50 of the person's versions.** The same for a drawing with 20. A person's save after an agent's. A crash after each step of 4.3. A broken `writers.json`. Trash and restore keep it. |
+| `core` | Front matter before a body: with and without a title and tags; quoting. `nook` added to a drawing, the other keys kept. `sketch.ts`: each shape type; default and given sizes; a label; an arrow's ends and bindings; every fault of 6.1 with its path; the same sketch and the same `random` give the same bytes. |
+| `server`, tokens | Make, list, revoke; the name's rules and the limit of 20; a revoked token is 401 at once; one person cannot see or revoke another's; removing a user, changing a password and `reset-password` remove the tokens; a token of a removed user is 401; the token is in no log line and only its hash is on disk. |
+| `server`, the boundary | 3.4. |
+| `server`, the interface | List; both reads, with the `ETag`; history; create of each kind and of the short form, with and without `title` and `tags`, with and without front matter or `nook`; each row of 5.8 with its hint; save, 409 with `current`, 428, a quoted `If-Match`; append with and without `If-Match`, for LF and CRLF notes, an empty note, a note ending in empty lines, a note with broken front matter; 410; each limit of 3.3. Every `curl` example of the guide. |
+| `server`, writers | `agent` in entries and history after each mix of person and agent saves. **A note a person saved 50 times, then saved 51 times by an agent, still has every one of the person's versions, by name, and the text the agent first replaced.** The same for a drawing. A person's save after an agent's removes the oldest of the person's beyond 50. A hand edit after an agent's save is a person's. A missing and a broken `writers.json`. A crash after each step of 4.3 is never an agent's text where a person's is. Trash and restore keep both folders. |
 | `web` stores | The Agents section through the API client with a fake server. |
-| `e2e` | Make a token on the Account screen and copy it; with it, from outside the browser, create a note and a drawing; both appear in the sidebar with the agent's mark and open; the drawing shows its shapes. Append to a note open in the browser, then save in the browser and get the conflict. Revoke, and the next request is 401. |
+| `e2e` | Make a token on the Account screen and copy it; with it, from outside the browser, create a note, an Excalidraw drawing and a short-form drawing; all appear in the sidebar with the agent's mark and open; the short-form drawing shows its shapes, opens not unsaved, and is unchanged after a save and a reload. Append to a note open in the browser, then save in the browser and get the conflict. Revoke, and the next request is 401. |
 
-Existing tests that compare a whole entry gain `agent: null`. No other existing test changes.
-
-## 9. Later: a simpler form for drawings
-
-Not built in this version. Recorded because eight of the nine models asked for it: an agent
-writing Excalidraw by hand gets the many values of each element subtly wrong (ids, seeds,
-bound text, arrow bindings).
-
-The idea: a second body type for create, a short list such as
-
-```json
-{ "shapes": [ { "id": "a", "type": "rectangle", "x": 0, "y": 0, "width": 160, "height": 60, "label": "Browser" },
-              { "id": "b", "type": "rectangle", "x": 320, "y": 0, "width": 160, "height": 60, "label": "Server" } ],
-  "arrows": [ { "from": "a", "to": "b", "label": "PUT" } ] }
-```
-
-which the server turns into an ordinary `drawing.excalidraw`. Reading always gives the
-Excalidraw file; the short form is for creating only.
-
-What is not known, and would be the first step: Excalidraw's own converter for such a list
-(`convertToExcalidrawElements`) is part of its browser package. Whether it runs in Node
-without a page, and whether text it has not measured is laid out correctly when the drawing
-is opened, has not been checked. If it does not run, Nook needs its own converter in `core`.
+Existing tests that compare a whole entry gain `agent: null`; those that read `auth` from a
+route read the new values. No other existing test changes.
 
 ## 10. Build order
 
-1. `contract`: the limits, the patterns, `agent` on routes and entries, the new routes.
-2. `core`: the two functions of section 6, with tests.
-3. `server`: tokens; the boundary in `app.ts` and its tests, before any agent route exists.
-4. `server`: writers in `space.ts` (4.2, 4.3) for a person's saves, with every existing test
-   still passing; then the agent routes of section 5, append, and the guide.
+1. `contract`: `auth`, the limits, the patterns, the types, the routes.
+2. `server`: tokens; the boundary of section 3 and its tests, before any agent route exists.
+3. `server`: writers in `space.ts` (4.2, 4.3) for a person's saves, with every existing test
+   still passing.
+4. `core`: front matter and `nook`. `server`: the routes of section 5, the limits of 3.3, the
+   guide without its short-form parts.
 5. `web`: the Agents section; the marks of 4.1.
-6. `e2e`, then `README.md`, `SPEC-NOTES.md`, `PROGRESS.md`, and the changes to `SPEC2.md`.
+6. The first step of 6.4, and its result written down. Then `sketch.ts`, the short form in
+   create, 6.3, and the guide's short-form parts.
+7. `e2e`, then `README.md`, `SPEC-NOTES.md`, `PROGRESS.md`, and the changes to `SPEC2.md`.
+
+Steps 1 to 5 are a working interface without the short form.
 
 ## 11. Risks
 
 - **A token is a secret in a file on a machine.** Whoever reads it can read every note of
   that person and write to them, until it is revoked. It cannot delete or take the account.
-- **An agent can still spoil the current text** of a note or a drawing with a bad save. The
-  person's versions are in history (4.3) and the mark of 4.1 shows that an agent wrote it;
-  nothing stops the save itself.
-- **A repeated create makes two items** when the first answer was lost. Accepted for now.
+- **An agent can still spoil the current text** with a bad save that is not empty. The
+  person's versions are in history, the agent can read history to undo, and the mark of 4.1
+  shows that an agent wrote it; nothing stops the save itself.
+- **A repeated create makes two items,** and a repeated append adds twice, when the first
+  answer was lost. The guide says how to avoid the second.
 - **A person editing while an agent saves** gets a conflict on their next save, as with two
   tabs. There is no merge.
-- **Twice the history on disk** (4.3).
-- **Hand-written Excalidraw** may open oddly or not at all until section 9 exists. The check
-  on a save is only DRAWINGS 4.4's: valid JSON with `type` and `elements`.
-- **`writers.json` can be one write behind** after a crash (4.3).
+- **Disk.** The limits of 3.3 are per day and in memory: over many days, or across restarts,
+  agents can still fill a disk, and only a person can remove what they made.
+- **A large drawing does not fit in an agent's context.** Reading gives the whole file,
+  images included, and saving needs all of it back.
+- **The short form's text sizes are estimates** until a person saves the drawing (6.3).
+- **Nook's converter follows Excalidraw's format by hand.** An upgrade of Excalidraw is
+  checked by opening a short-form drawing, as stored drawings are checked.
 
 ## 12. Changes this makes to SPEC2 and SPEC-DRAWINGS
 
-SPEC2 4.2 (a file in an item's folder). 4.4 (a step, and the rule for old history). 4.6 (a
-version has a writer). 5 (tokens; where the `Origin` check applies). 6 (the routes, `agent` in
-entries, `hint`, 428). 9 (the Account screen; the marks). 11 (the ids of section 7).
-SPEC-DRAWINGS 4.4 (history: 20 of a person's and 20 of agents').
+SPEC2 4.2 (two more things in an item's folder). 4.4 (the steps, and what a request may
+remove). 4.6 (two folders; a version has a writer). 5 (tokens; three ways to be let in; where
+the `Origin` check applies; what a password change ends). 6 (the routes, `auth`, `agent` in
+entries, `hint`, 428). 9 (the Account screen; the marks). 11 (the ids of section 8).
+SPEC-DRAWINGS 4.2 (`nook.sketch`). 4.4 (agents' versions: 5). 5 (the short form's type).
 
 ## 13. Open questions for the owner
 
-1. Should the simpler drawing form (section 9) be in this version after all?
-2. Should a command-line tool or an MCP server be in this version?
-3. Is twice the history on disk acceptable, or should agents' versions have a smaller limit?
-4. Should an agent be able to add photos to a note?
+1. Decisions 4 to 12 of 1.2 are proposals. The two that change something a person does today
+   are 11 (a password change revokes tokens) and 12 (the limits of 3.3).
+2. Should an agent be able to read a note's photos? Two reviewers asked for it, so that an
+   agent can understand a note with pictures. Adding photos stays out either way.
+
+## 14. Changes since draft 1
+
+**Draft 2.** From a review of draft 1 against the code by eight AI models (a ninth did not
+answer), a check of Excalidraw's converter in Node, and one decision by the owner (1.1, 3).
+
+- **History.** Draft 1's promise was false: the first agent save after a person's removed the
+  person's oldest version, and a crash, a hand edit or a broken `writers.json` could file a
+  person's text as an agent's and let it be removed. Agents' versions now have their own
+  folder; an agent's request removes nothing from `history/`; `current` counts only with a
+  matching revision; `writers.json` is written before the main file, so a crash errs toward
+  a person (4.2, 4.3). All eight found this.
+- **Agents' history is smaller:** 10 and 5, not 50 and 20.
+- **Three ways to be let in** (3.1), where draft 1 had a flag that could not say "no token"
+  for the guide. The boundary tests leave out login and the guide.
+- **Unknown agent addresses** are 404 with a hint (3.2); draft 1 would have answered 403.
+- **428** needs the save route to declare no header schema (5.6); `hint` is inside `error`
+  and comes from three places (5.8); `broken-front-matter` and seven more codes are listed.
+- **Limits on volume** (3.3), and refusals for a save that empties or drops images.
+- **Create** has its own route; the front matter is built in `core` from `newNoteText`, not
+  `fmwriter`; `nook` is added without `serializeDrawing`; titles and tags have rules (5.5).
+- **Append** is one locked function with rules for line endings, empty lines, a byte order
+  mark and broken front matter (5.6).
+- **Reading history** and **reading the raw file with an `ETag`** are added (5.3, 5.4).
+- **Tokens** need a living user, and go with a password change or reset (2.1).
+- **The short form for drawings is in** (section 6), with Nook's own converter.
+- Not taken: `Idempotency-Key`, paging, a public-address setting (5 says why the request's
+  own address is used), reading a drawing without its images, photos.
