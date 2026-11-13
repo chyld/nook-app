@@ -555,3 +555,15 @@ delete, to reach another person, or to remove a person's version. What changed:
   cookie.
 - "A crash after each step of 4.3" stops the save by throwing at the step, in the same
   process, which leaves the disk as a crash there would; the server is not restarted.
+
+## Save and Move to trash in the header (2026-11-13)
+
+Departs from SPEC2 3 (item 4) and 9, and from SPEC-DRAWINGS 6. On the note screen and the
+drawing screen alike, the header ends with a divider, then **Save**, then **Move to trash**,
+both as icon buttons with their names as labels and tooltips (`save`, `note-trash`).
+
+- Save is muted (the surface colour, soft ink) while the save status is `saved`, and the
+  accent colour in every other state (`dirty`, `saving`, `error`). It is never disabled for
+  being saved.
+- Move to trash is no longer in Note settings; History stays there. On the drawing screen
+  History is before the divider.

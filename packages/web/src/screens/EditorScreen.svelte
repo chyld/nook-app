@@ -259,7 +259,7 @@
     if (ends) addTag();
   }
 
-  // Note settings: font and size, History, Move to trash.
+  // Note settings: font and size, History. (Move to trash is in the header, beside Save.)
   let sizeText = $state("");
   $effect(() => {
     sizeText = settings.fields.size.value.replace(/pt$/, "");
@@ -357,7 +357,9 @@
       <Button small keepFocus data-testid="mode-toggle" title={`Now ${editor.mode === "rich" ? "Rich" : "Raw"}; switch to ${editor.mode === "rich" ? "Raw" : "Rich"}`} onclick={() => setMode(editor.mode === "rich" ? "raw" : "rich")}>{editor.mode === "rich" ? "Rich" : "Raw"}</Button>
       <Button small variant="icon" data-testid="note-settings" aria-label="Note settings" title="Note settings" pressed={settingsOpen} onclick={() => (settingsOpen = !settingsOpen)}><Icon name="settings" /></Button>
       <Button small variant="icon" aria-label="New note" title="New note" onclick={makeNote}><Icon name="plus" /></Button>
-      <Button small keepFocus variant="primary" data-testid="save" title="Save (Ctrl+S)" disabled={editor.loading || !!editor.loadError} onclick={save}><Icon name="save" size={16} /> Save</Button>
+      <span class="divider" aria-hidden="true"></span>
+      <Button small square keepFocus variant={editor.saveState === "saved" ? "muted" : "primary"} data-testid="save" aria-label="Save" title="Save (Ctrl+S)" disabled={editor.loading || !!editor.loadError} onclick={save}><Icon name="save" /></Button>
+      <Button small variant="icon" data-testid="note-trash" aria-label="Move to trash" title="Move to trash" onclick={toTrash}><Icon name="trash" /></Button>
     </div>
   </header>
 
@@ -387,7 +389,6 @@
         </select>
       </label>
       <Button small data-testid="note-history" onclick={() => router.go(`/n/${id}/history`)}><Icon name="history" size={16} /> History</Button>
-      <Button small variant="quiet" data-testid="note-trash" onclick={toTrash}><Icon name="trash" size={16} /> Move to trash</Button>
       {#if settings.broken}<span class="warn">The front matter does not parse; these settings are off. Edit it in Raw.</span>{/if}
     </div>
   {/if}
@@ -559,6 +560,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .divider {
+    width: 1px;
+    height: 1.25rem;
+    margin: 0 var(--s-1);
+    background: var(--rule);
   }
   .status.dirty {
     color: var(--c-orange);

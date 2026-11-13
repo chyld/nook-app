@@ -1,16 +1,18 @@
 <script lang="ts">
   // SPEC2 10: Button (primary, plain, quiet, danger, icon), and lamp: the yellow of the logo's
-  // lamp, for New drawing.
+  // lamp, for New drawing. `muted` is plain with soft ink (Save with nothing to save); `square`
+  // is for a bordered button that holds only an icon.
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
-  type Props = HTMLButtonAttributes & { variant?: "primary" | "plain" | "quiet" | "danger" | "icon" | "lamp"; small?: boolean; pressed?: boolean | undefined; children?: Snippet; keepFocus?: boolean };
-  let { variant = "plain", small = false, pressed = undefined, children, keepFocus = false, type = "button", ...rest }: Props = $props();
+  type Props = HTMLButtonAttributes & { variant?: "primary" | "plain" | "quiet" | "danger" | "icon" | "lamp" | "muted"; small?: boolean; square?: boolean; pressed?: boolean | undefined; children?: Snippet; keepFocus?: boolean };
+  let { variant = "plain", small = false, square = false, pressed = undefined, children, keepFocus = false, type = "button", ...rest }: Props = $props();
 </script>
 
 <button
   {type}
   class="btn {variant}"
   class:small
+  class:square
   class:on={pressed === true}
   aria-pressed={pressed}
   onmousedown={keepFocus ? (e) => e.preventDefault() : undefined}
@@ -56,6 +58,17 @@
   }
   .primary:hover:not(:disabled) {
     background: var(--accent-strong);
+  }
+  .muted {
+    color: var(--ink-soft);
+  }
+  .square {
+    min-width: 2.25rem;
+    padding: 0 var(--s-2);
+  }
+  .square.small {
+    min-width: 1.875rem;
+    padding: 0 var(--s-1);
   }
   .lamp {
     border-color: var(--c-yellow);

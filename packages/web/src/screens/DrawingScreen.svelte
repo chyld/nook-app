@@ -1,7 +1,7 @@
 <script lang="ts">
   // SPEC-DRAWINGS 6: the drawing screen. The editor screen's layout, with the sidebar; the
-  // header has the notes button, the title, the tags, the save status, Save, History and Move to
-  // trash. Excalidraw (3.1) is loaded only now: the asset path is set first, then `mount.ts` is
+  // header has the notes button, the title, the tags, the save status, History, Save and Move to
+  // trash (the last two as icons, in the note screen's place). Excalidraw (3.1) is loaded only now: the asset path is set first, then `mount.ts` is
   // imported. The open drawing's other state lives in the `editor` store, which asks this view
   // for the scene (4.3 to 4.5).
   import { onMount } from "svelte";
@@ -273,9 +273,10 @@
     <div class="row2">
       <span class="status {editor.saveState}" data-testid="save-status" data-state={editor.saveState}>{statusLabel}</span>
       {#if editor.entry?.agent}<span class="by" data-testid="written-by" title="An agent wrote this text. It stays marked until you save a change.">Written by {editor.entry.agent}</span>{/if}
-      <Button small variant="primary" data-testid="save" title="Save (Ctrl+S)" disabled={!ready || !!editor.loadError} onclick={save}><Icon name="save" size={16} /> Save</Button>
       <Button small data-testid="note-history" onclick={() => router.go(`/d/${id}/history`)}><Icon name="history" size={16} /> History</Button>
-      <Button small variant="quiet" data-testid="note-trash" onclick={toTrash}><Icon name="trash" size={16} /> Move to trash</Button>
+      <span class="divider" aria-hidden="true"></span>
+      <Button small square variant={editor.saveState === "saved" ? "muted" : "primary"} data-testid="save" aria-label="Save" title="Save (Ctrl+S)" disabled={!ready || !!editor.loadError} onclick={save}><Icon name="save" /></Button>
+      <Button small variant="icon" data-testid="note-trash" aria-label="Move to trash" title="Move to trash" onclick={toTrash}><Icon name="trash" /></Button>
     </div>
   </header>
 
@@ -423,6 +424,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .divider {
+    width: 1px;
+    height: 1.25rem;
+    margin: 0 var(--s-1);
+    background: var(--rule);
   }
   .status.dirty {
     color: var(--c-orange);
