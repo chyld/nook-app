@@ -11,7 +11,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import { Value } from "@sinclair/typebox/value";
-import { LIMITS, PAGES, routes, type Answer, type RouteDef, type RouteName } from "../../contract/src/index.ts";
+import { DRAWING_TYPE, kindOfType, LIMITS, PAGES, routes, type Answer, type Kind, type RouteDef, type RouteName } from "../../contract/src/index.ts";
 import { Accounts, type User } from "./accounts.ts";
 import type { Context } from "./context.ts";
 import { errorBody, HttpError } from "./errors.ts";
@@ -55,7 +55,10 @@ export const CSP = [
 type Handler<N extends RouteName> = (req: FastifyRequest, reply: FastifyReply) => Promise<Answer<N> | FastifyReply | void>;
 type Handlers = { [N in RouteName]: Handler<N> };
 
-const CHANGING_TYPES = new Set(["application/json", "text/markdown", "multipart/form-data"]);
+const CHANGING_TYPES = new Set(["application/json", "text/markdown", DRAWING_TYPE, "multipart/form-data"]);
+
+/** A request's body type, without its parameters. */
+const bodyType = (req: FastifyRequest): string => (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
 
 export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   const trusted = ctx.config.trustedProxy;
@@ -93,9 +96,10 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
 
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: LIMITS.photoBytes, files: 1, fields: 0, parts: 2 } });
-  // A note travels as its raw bytes (4.4).
+  // A note travels as its raw bytes (4.4), and so does a drawing (SPEC-DRAWINGS 5).
   app.removeContentTypeParser("text/plain");
   app.addContentTypeParser("text/markdown", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+  app.addContentTypeParser(DRAWING_TYPE, { parseAs: "buffer" }, (_req, body, done) => done(null, body));
 
   // --- every request ---------------------------------------------------------------------------
   app.addHook("onRequest", async (req) => {
@@ -113,9 +117,9 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
       ok = false;
     }
     if (!ok) throw new HttpError(403, "This request did not come from this site.");
-    const type = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+    const type = bodyType(req);
     const hasBody = Number(req.headers["content-length"] ?? "0") > 0 || req.headers["transfer-encoding"] !== undefined;
-    if ((type !== "" || hasBody) && !CHANGING_TYPES.has(type)) throw new HttpError(415, "Requests that change something are JSON, text/markdown or a file upload.");
+    if ((type !== "" || hasBody) && !CHANGING_TYPES.has(type)) throw new HttpError(415, `Requests that change something are JSON, text/markdown, ${DRAWING_TYPE} or a file upload.`);
     const want = req.routeOptions.config?.body;
     if (want === undefined) return;
     const fits =
@@ -123,7 +127,8 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
       want === "json" ? type === "application/json" :
       want === "markdown" ? type === "text/markdown" :
       want === "multipart" ? type === "multipart/form-data" :
-      want === "document" ? type === "text/markdown" :
+      want === "document" ? kindOfType(type) !== null :
+      want === "json-or-document" ? type === "application/json" || kindOfType(type) !== null :
       type === "application/json" || type === "text/markdown";
     if (!fits) throw new HttpError(415, "This request has the wrong kind of body.");
   });
@@ -191,9 +196,11 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
   const run = <T>(req: FastifyRequest, fn: Parameters<typeof ctx.spaces.run<T>>[1]) => ctx.spaces.run(userOf(req).id, fn);
   const params = (req: FastifyRequest) => req.params as Record<string, string>;
   const bytesOf = (req: FastifyRequest): Buffer => {
-    if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "The note's text is sent as text/markdown.");
+    if (!Buffer.isBuffer(req.body)) throw new HttpError(400, `A note's text is sent as text/markdown, a drawing as ${DRAWING_TYPE}.`);
     return req.body;
   };
+  /** The kind a document body's type names (the body check let only those two through). */
+  const kindOfBody = (req: FastifyRequest): Kind => kindOfType(bodyType(req)) ?? "note";
   const fonts = new Fonts(ctx);
 
   const sendFile = (reply: FastifyReply, f: { fh: FileHandle; size: number }, type: string) => {
@@ -242,20 +249,23 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
       const q = req.query as { from?: string };
       if (Buffer.isBuffer(req.body)) {
         const body = req.body;
-        const r = await run(req, (s) => s.saveAsNew(body, q.from));
+        const kind = kindOfBody(req);
+        const r = await run(req, (s) => s.saveAsNew(body, q.from, kind));
         return reply.status(201).send({ id: r.id, revision: r.revision, entry: r.entry, text: r.text, photosMissing: r.photosMissing });
       }
       // No body is `{}`; any JSON body, `null` too, must match the schema.
       const b = req.body === undefined ? {} : req.body;
       if (!Value.Check(routes.create.json, b)) throw new HttpError(400, "The request does not match its schema.");
-      const r = await run(req, (s) => s.create((b as { title?: string }).title));
+      const j = b as { title?: string; kind?: Kind };
+      const r = await run(req, (s) => s.create(j.title, j.kind ?? "note"));
       return reply.status(201).send({ id: r.id, revision: r.revision, entry: r.entry, text: r.text, photosMissing: false });
     },
     read: async (req) => run(req, (s) => s.read(params(req).id)),
     save: async (req) => {
       const bytes = bytesOf(req);
       const rev = String(req.headers["if-match"] ?? "").replace(/^"|"$/g, "");
-      return run(req, (s) => s.save(params(req).id, rev, bytes));
+      const kind = kindOfBody(req);
+      return run(req, (s) => s.save(params(req).id, rev, bytes, kind));
     },
     trash: async (req) => {
       await run(req, (s) => s.trash(params(req).id));
@@ -282,8 +292,9 @@ export async function buildApp(ctx: Context): Promise<FastifyInstance> {
         if (part.file.truncated) throw new HttpError(413, "A photo may be at most 25 MB.");
         const type = sniff(data.subarray(0, 64));
         if (!type) throw new HttpError(422, "Only JPEG, PNG, WebP, GIF and AVIF photos can be added.", {}, "not-an-image");
-        // The note must exist before the work is done; it is checked again under the lock.
-        await run(req, (s) => s.live(id));
+        // The note must exist before the work is done; it is checked again under the lock. A
+        // drawing has no photos (SPEC-DRAWINGS 5).
+        if ((await run(req, (s) => s.live(id))).kind === "drawing") throw new HttpError(404, "A drawing keeps its images inside its file.");
         const done = await processImage(data, type);
         return run(req, (s) => s.storePhoto(id, photoBaseName(part.filename ?? ""), EXTENSION[type], done));
       });

@@ -1,29 +1,33 @@
 // SPEC2 section 4: storage. A note is a folder named by its id; its file is always `note.md`
-// and its photos are in `note.assets/`. Every request that reads the index or changes a file of
+// and its photos are in `note.assets/`. A drawing (SPEC-DRAWINGS 4) is a folder of the same tree
+// and id space whose file is `drawing.excalidraw`, its images inside it; the main file decides
+// the kind, and every operation below works by kind. Every request that reads the index or changes a file of
 // a user goes through `Spaces.run(userId, fn)`, which holds that user's lock (4.1, rule 2). The
 // methods of `UserSpace` assume the lock is held; nothing else calls them.
 
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
-import { LIMITS, makeVersion, newNoteId, randomBase32, RE, type Entry, type HistoryEntry, type TrashEntry } from "../../contract/src/index.ts";
-import { cleanTitle, decodeUtf8, hasBrokenFrontMatter, noteTitle, plainSpaces } from "../../core/src/index.ts";
+import { KIND_LIMITS, MB, makeVersion, newNoteId, randomBase32, RE, type Entry, type HistoryEntry, type Kind, type TrashEntry } from "../../contract/src/index.ts";
+import { cleanTitle, decodeUtf8, drawingFacts, drawingProblem, emptyDrawing, hasBrokenFrontMatter, noteTitle, parseDrawing, plainSpaces, usedFileIds } from "../../core/src/index.ts";
 import { parseNote } from "../../../noteformat/src/index.ts";
 import { HttpError } from "./errors.ts";
 import { createFile, emptyDir, ensureDir, errCode, fsyncDir, isNotFound, readRegular, replaceFile, revisionOf, step } from "./fsutil.ts";
-import { DataLayout, UserLayout } from "./layout.ts";
+import { DataLayout, EXT, MAIN_FILE, UserLayout } from "./layout.ts";
 import { Mutex } from "./lock.ts";
 import type { Logger } from "./log.ts";
 import { lstatOrNull, readdirOrEmpty, sfs as fs } from "./safefs.ts";
 
 interface Indexed {
   id: string;
+  kind: Kind;
   title: string;
   tags: string[];
   created: string | null;
   mtimeNs: bigint;
   size: number;
-  /** Null when the file is not valid UTF-8. */
+  /** Null when the file is not valid UTF-8. A note's text; a drawing's is the text of its text
+   *  elements (SPEC-DRAWINGS 4.6), never its bytes. */
   text: string | null;
   broken: boolean;
 }
@@ -59,17 +63,43 @@ function facts(text: string | null): Pick<Indexed, "title" | "tags" | "created" 
   return { title: noteTitle(text), tags: f.tags ?? [], created: f.created ?? null, broken };
 }
 
+/** The facts of either kind, and the text the index keeps for search (SPEC-DRAWINGS 4.6). */
+function factsOf(kind: Kind, text: string | null): Pick<Indexed, "title" | "tags" | "created" | "broken" | "text"> {
+  if (kind === "note" || text === null) return { ...facts(text), text };
+  const f = drawingFacts(text);
+  return { title: f.title, tags: f.tags, created: f.created, broken: f.broken, text: f.text };
+}
+
+const what = (kind: Kind) => (kind === "note" ? "note" : "drawing");
+
 /** Decodes a note's bytes; the API carries the text exactly as decoded (4.4). */
 export function decodeNote(bytes: Uint8Array): string | null {
   return decodeUtf8(bytes);
 }
 
-/** 4.4: the new bytes of a save: valid UTF-8, at most 2 MB, no broken front matter. */
-export function checkBytes(bytes: Uint8Array): string {
-  if (bytes.length > LIMITS.noteBytes) throw new HttpError(413, "A note may be at most 2 MB.");
+/** The limit of a kind (2 MB for a note, 25 MB for a drawing): 413 past it. */
+export function checkSize(bytes: Uint8Array, kind: Kind): void {
+  const max = KIND_LIMITS[kind].bytes;
+  if (bytes.length > max) {
+    const mb = (bytes.length / MB).toFixed(1);
+    throw new HttpError(413, kind === "note" ? "A note may be at most 2 MB." : `This drawing is ${mb} MB; a drawing may be at most 25 MB.`, { size: bytes.length, limit: max });
+  }
+}
+
+/** 4.4: the new bytes of a save: valid UTF-8, at most 2 MB, no broken front matter. A drawing
+ *  (SPEC-DRAWINGS 4.4): at most 25 MB, valid UTF-8, a JSON object with `type` "excalidraw" and
+ *  an array `elements`. */
+export function checkBytes(bytes: Uint8Array, kind: Kind = "note"): string {
+  checkSize(bytes, kind);
   const text = decodeUtf8(bytes);
   if (text === null) throw new HttpError(422, "The text is not valid UTF-8.", {}, "not-utf8");
-  if (hasBrokenFrontMatter(text)) throw new HttpError(422, "The front matter at the top of the note does not parse. Fix it in Raw.", {}, "broken-front-matter");
+  if (kind === "note") {
+    if (hasBrokenFrontMatter(text)) throw new HttpError(422, "The front matter at the top of the note does not parse. Fix it in Raw.", {}, "broken-front-matter");
+  } else {
+    const problem = drawingProblem(text);
+    if (problem === "not-json") throw new HttpError(422, "The drawing is not a JSON object.", {}, "not-json");
+    if (problem === "not-excalidraw") throw new HttpError(422, 'The drawing is not an Excalidraw scene: it needs "type": "excalidraw" and a list of elements.', {}, "not-excalidraw");
+  }
   return text;
 }
 
@@ -109,7 +139,23 @@ export class UserSpace {
 
   // --- the index and the folder check (4.5) ---------------------------------------------------
 
-  /** Reads one note folder into the index if it changed; null when it is not a live note. */
+  /** The kind of a folder, by its main file (SPEC-DRAWINGS 4.1): a regular `note.md` makes a
+   *  note; without one, a regular `drawing.excalidraw` makes a drawing; null otherwise. */
+  async kindOf(id: string, where: "notes" | "trash" = "notes"): Promise<{ kind: Kind; st: import("node:fs").BigIntStats } | null> {
+    for (const kind of ["note", "drawing"] as const) {
+      let st;
+      try {
+        st = await fs.lstatBig(this.notePath(id, MAIN_FILE[kind], where));
+      } catch (e) {
+        if (isNotFound(e) || errCode(e) === "ENOTDIR") continue;
+        throw e;
+      }
+      if (st.isFile()) return { kind, st };
+    }
+    return null;
+  }
+
+  /** Reads one folder into the index if it changed; null when it is not a live note or drawing. */
   async #check(id: string): Promise<Indexed | null> {
     const dir = this.notePath(id, "dir");
     const dst = await lstatOrNull(dir);
@@ -117,30 +163,20 @@ export class UserSpace {
       this.index.delete(id);
       return null;
     }
-    const file = this.notePath(id, "note.md");
-    let st;
-    try {
-      st = await fs.lstatBig(file);
-    } catch (e) {
-      if (isNotFound(e)) {
-        this.index.delete(id);
-        return null;
-      }
-      throw e;
-    }
-    if (!st.isFile()) {
+    const found = await this.kindOf(id);
+    if (!found) {
       this.index.delete(id);
       return null;
     }
+    const { kind, st } = found;
     const known = this.index.get(id);
-    if (known && known.mtimeNs === st.mtimeNs && known.size === Number(st.size)) return known;
-    const bytes = await readRegular(file);
+    if (known && known.kind === kind && known.mtimeNs === st.mtimeNs && known.size === Number(st.size)) return known;
+    const bytes = await readRegular(this.notePath(id, MAIN_FILE[kind]));
     if (!bytes) {
       this.index.delete(id);
       return null;
     }
-    const text = decodeNote(bytes);
-    const e: Indexed = { id, ...facts(text), mtimeNs: st.mtimeNs, size: bytes.length, text };
+    const e: Indexed = { id, kind, ...factsOf(kind, decodeNote(bytes)), mtimeNs: st.mtimeNs, size: bytes.length };
     // The stat taken before the read says what was read; a write meanwhile is seen next time.
     this.index.set(id, e);
     return e;
@@ -157,7 +193,7 @@ export class UserSpace {
   }
 
   entryOf(e: Indexed): Entry {
-    const out: Entry = { id: e.id, kind: "note", title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size };
+    const out: Entry = { id: e.id, kind: e.kind, title: e.title, tags: e.tags, created: e.created, modified: Number(e.mtimeNs / 1_000_000n), size: e.size };
     if (e.text === null) out.problem = "unreadable";
     else if (e.broken) out.problem = "broken";
     return out;
@@ -194,10 +230,10 @@ export class UserSpace {
 
   async read(id: string): Promise<NoteDoc> {
     const e = await this.live(id);
-    const bytes = await readRegular(this.notePath(id, "note.md"));
+    const bytes = await readRegular(this.notePath(id, MAIN_FILE[e.kind]));
     if (!bytes) throw notFound();
     const text = decodeNote(bytes);
-    if (text === null) throw new HttpError(422, "This note is not valid UTF-8 and cannot be opened.", {}, "not-utf8");
+    if (text === null) throw new HttpError(422, `This ${what(e.kind)} is not valid UTF-8 and cannot be opened.`, {}, "not-utf8");
     return { text, revision: revisionOf(bytes), entry: this.entryOf(e) };
   }
 
@@ -211,20 +247,20 @@ export class UserSpace {
     }
   }
 
-  /** "Untitled N": the smallest N from 1 that no live note's title uses. */
+  /** "Untitled N": the smallest N from 1 that no live note's or drawing's title uses. */
   async #untitled(): Promise<string> {
     await this.checkAll();
     const used = new Set([...this.index.values()].map((e) => e.title));
     for (let n = 1; ; n++) if (!used.has(`Untitled ${n}`)) return `Untitled ${n}`;
   }
 
-  /** Builds a note folder in `tmp/` and renames it into `notes/` (4.3, Create). */
-  async #build(text: string, assetsFrom: string | null): Promise<string> {
+  /** Builds a folder in `tmp/` and renames it into `notes/` (4.3, Create). */
+  async #build(text: string, assetsFrom: string | null, kind: Kind = "note"): Promise<string> {
     const id = await this.#newId();
     const build = path.join(this.layout.tmp, `new-${id}-${randomBase32(6)}`);
     await fs.mkdir(build, { mode: 0o700 });
     try {
-      const fh = await fs.open(path.join(build, "note.md"), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      const fh = await fs.open(path.join(build, MAIN_FILE[kind]), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       try {
         await fh.writeFile(Buffer.from(text, "utf8"));
         await fh.sync();
@@ -265,16 +301,19 @@ export class UserSpace {
     await fsyncDir(to);
   }
 
-  async create(title: string | undefined): Promise<NoteDoc & { id: string }> {
+  async create(title: string | undefined, kind: Kind = "note"): Promise<NoteDoc & { id: string }> {
     let t = cleanTitle(title ?? "");
     if (t === "") t = await this.#untitled();
-    const text = newNoteText(t, today());
-    const id = await this.#build(text, null);
+    const text = kind === "note" ? newNoteText(t, today()) : emptyDrawing(t, today());
+    const id = await this.#build(text, null, kind);
     return { id, ...(await this.read(id)) };
   }
 
-  /** 4.7: save as a new note, with the source's photos if it is live or in the trash. */
-  async saveAsNew(bytes: Uint8Array, from: string | undefined): Promise<NoteDoc & { id: string; photosMissing: boolean }> {
+  /** 4.7: save as a new note, with the source's photos if it is live or in the trash. A drawing
+   *  (SPEC-DRAWINGS 4.5): the images its elements use that the draft lacks come from the
+   *  source's file. */
+  async saveAsNew(bytes: Uint8Array, from: string | undefined, kind: Kind = "note"): Promise<NoteDoc & { id: string; photosMissing: boolean }> {
+    if (kind === "drawing") return this.#saveDrawingAsNew(bytes, from);
     const text = checkBytes(bytes);
     let source: string | null = null;
     if (from && RE.noteId.test(from)) {
@@ -290,12 +329,50 @@ export class UserSpace {
     return { id, ...(await this.read(id)), photosMissing: usesPhotos && source === null };
   }
 
+  async #saveDrawingAsNew(bytes: Uint8Array, from: string | undefined): Promise<NoteDoc & { id: string; photosMissing: boolean }> {
+    const text = checkBytes(bytes, "drawing");
+    const doc = parseDrawing(text).doc!;
+    const files: Record<string, unknown> = typeof doc.files === "object" && doc.files !== null && !Array.isArray(doc.files) ? { ...(doc.files as Record<string, unknown>) } : {};
+    const wanted = usedFileIds(doc.elements as unknown[]).filter((f) => files[f] === undefined);
+    let out = text;
+    if (wanted.length && from && RE.noteId.test(from)) {
+      let sourceFiles: Record<string, unknown> = {};
+      for (const where of ["notes", "trash"] as const) {
+        const found = await this.kindOf(from, where);
+        if (!found || found.kind !== "drawing") continue;
+        const src = await readRegular(this.notePath(from, "drawing.excalidraw", where));
+        const srcText = src ? decodeNote(src) : null;
+        const srcDoc = srcText === null ? null : parseDrawing(srcText).doc;
+        if (srcDoc && typeof srcDoc.files === "object" && srcDoc.files !== null && !Array.isArray(srcDoc.files)) sourceFiles = srcDoc.files as Record<string, unknown>;
+        break;
+      }
+      let filled = false;
+      for (const f of wanted) {
+        if (sourceFiles[f] === undefined) continue;
+        files[f] = sourceFiles[f];
+        filled = true;
+      }
+      if (filled) {
+        const sorted: Record<string, unknown> = {};
+        for (const k of Object.keys(files).sort()) sorted[k] = files[k];
+        out = JSON.stringify({ ...doc, files: sorted }, null, 2) + "\n";
+        checkBytes(Buffer.from(out, "utf8"), "drawing");
+      }
+    }
+    const missing = usedFileIds(doc.elements as unknown[]).some((f) => files[f] === undefined);
+    const id = await this.#build(out, null, "drawing");
+    return { id, ...(await this.read(id)), photosMissing: missing };
+  }
+
   // --- saving (4.4) ------------------------------------------------------------------------------
 
-  async save(id: string, sent: string, bytes: Uint8Array): Promise<{ revision: string; entry: Entry }> {
-    // 1. Find the note.
-    await this.live(id);
-    const file = this.notePath(id, "note.md");
+  async save(id: string, sent: string, bytes: Uint8Array, kind: Kind = "note"): Promise<{ revision: string; entry: Entry }> {
+    // 1. Find the note or drawing; a body of the other kind is refused (SPEC-DRAWINGS 5).
+    const item = await this.live(id);
+    if (item.kind !== kind) throw new HttpError(415, item.kind === "note" ? "This is a note: it is saved as text/markdown." : "This is a drawing: it is saved as an Excalidraw file.");
+    // Then the limit of that kind (SPEC-DRAWINGS 5), before the comparison.
+    checkSize(bytes, kind);
+    const file = this.notePath(id, MAIN_FILE[kind]);
     // 2. Compare.
     const old = await readRegular(file);
     if (!old) throw notFound();
@@ -303,10 +380,10 @@ export class UserSpace {
     if (current !== sent) {
       const text = decodeNote(old);
       const e = await this.#check(id);
-      throw new HttpError(409, "The note was changed since you opened it.", text === null || !e ? {} : { current: { text, revision: current, entry: this.entryOf(e) } }, "changed");
+      throw new HttpError(409, `The ${what(kind)} was changed since you opened it.`, text === null || !e ? {} : { current: { text, revision: current, entry: this.entryOf(e) } }, "changed");
     }
     // 3. Check the new bytes.
-    checkBytes(bytes);
+    checkBytes(bytes, kind);
     // 4. Nothing changed: write nothing.
     if (Buffer.compare(Buffer.from(old), Buffer.from(bytes)) === 0) {
       const e = await this.#check(id);
@@ -318,7 +395,7 @@ export class UserSpace {
     for (;;) {
       const version = makeVersion(new Date());
       try {
-        await createFile(this.layout.tmp, this.notePath(id, { version }), old);
+        await createFile(this.layout.tmp, this.notePath(id, { version, kind }), old);
         break;
       } catch (e) {
         if (errCode(e) !== "EEXIST") throw e;
@@ -328,9 +405,10 @@ export class UserSpace {
     // 6. Replace the note.
     await replaceFile(this.layout.tmp, file, bytes);
     step("save:replaced");
-    // 7. History beyond the newest 50 goes.
-    const versions = (await readdirOrEmpty(hist)).filter((n) => n.endsWith(".md") && RE.version.test(n.slice(0, -3))).sort();
-    const extra = versions.slice(0, Math.max(0, versions.length - LIMITS.history));
+    // 7. History beyond the newest 50 goes (20 for a drawing).
+    const ext = EXT[kind];
+    const versions = (await readdirOrEmpty(hist)).filter((n) => n.endsWith(ext) && RE.version.test(n.slice(0, -ext.length))).sort();
+    const extra = versions.slice(0, Math.max(0, versions.length - KIND_LIMITS[kind].history));
     for (const n of extra) await fs.rm(path.join(hist, n), { force: true });
     // Synced, so a crash cannot bring removed versions back (4.4: at worst one extra file).
     if (extra.length) await fsyncDir(hist);
@@ -394,7 +472,10 @@ export class UserSpace {
     const dir = this.notePath(id, "dir", "trash");
     const st = await lstatOrNull(dir);
     if (!st?.isDirectory()) return null;
-    const bytes = await readRegular(this.notePath(id, "note.md", "trash"));
+    const found = await this.kindOf(id, "trash");
+    if (!found) return null;
+    const kind = found.kind;
+    const bytes = await readRegular(this.notePath(id, MAIN_FILE[kind], "trash"));
     if (!bytes) return null;
     const text = decodeNote(bytes);
     let when: string | null = null;
@@ -407,8 +488,8 @@ export class UserSpace {
         when = null;
       }
     }
-    const f = facts(text);
-    return { entry: { id, kind: "note", title: f.title, tags: f.tags, trashed: when, size: bytes.length }, text };
+    const f = factsOf(kind, text);
+    return { entry: { id, kind, title: f.title, tags: f.tags, trashed: when, size: bytes.length }, text };
   }
 
   async listTrash(): Promise<TrashEntry[]> {
@@ -427,19 +508,20 @@ export class UserSpace {
     if (!t) throw new HttpError(404, "There is no such note in the trash.");
     // As for a live note (4.5): a file that is not UTF-8 cannot be opened; it stays listed and
     // can be restored or deleted.
-    if (t.text === null) throw new HttpError(422, "This note is not valid UTF-8 and cannot be opened.", {}, "not-utf8");
+    if (t.text === null) throw new HttpError(422, `This ${what(t.entry.kind)} is not valid UTF-8 and cannot be opened.`, {}, "not-utf8");
     return { text: t.text, entry: t.entry };
   }
 
   // --- history (4.6) ---------------------------------------------------------------------------
 
   async history(id: string): Promise<HistoryEntry[]> {
-    await this.live(id);
+    const { kind } = await this.live(id);
+    const ext = EXT[kind];
     const dir = this.notePath(id, "history");
     const out: HistoryEntry[] = [];
     for (const n of await readdirOrEmpty(dir)) {
-      if (!n.endsWith(".md")) continue;
-      const version = n.slice(0, -3);
+      if (!n.endsWith(ext)) continue;
+      const version = n.slice(0, -ext.length);
       if (!RE.version.test(version)) continue;
       const st = await lstatOrNull(path.join(dir, n));
       if (!st?.isFile()) continue;
@@ -450,9 +532,9 @@ export class UserSpace {
   }
 
   async version(id: string, version: string): Promise<string> {
-    await this.live(id);
+    const { kind } = await this.live(id);
     if (!RE.version.test(version)) throw new HttpError(404, "There is no such version.");
-    const bytes = await readRegular(this.notePath(id, { version }));
+    const bytes = await readRegular(this.notePath(id, { version, kind }));
     if (!bytes) throw new HttpError(404, "There is no such version.");
     const text = decodeNote(bytes);
     if (text === null) throw new HttpError(422, "This version is not valid UTF-8.", {}, "not-utf8");
@@ -463,9 +545,14 @@ export class UserSpace {
 
   /** Opens a photo for serving, under the lock; it is sent after the lock is released. */
   async openAsset(id: string, file: string, where: "notes" | "trash"): Promise<{ fh: FileHandle; size: number; head: Buffer }> {
-    if (where === "notes") await this.live(id);
-    else if (!(await lstatOrNull(this.notePath(id, "dir", "trash")))?.isDirectory()) throw new HttpError(404, "There is no such note in the trash.");
     const missing = () => new HttpError(404, "There is no such photo.");
+    if (where === "notes") {
+      // A drawing's images are inside its file (SPEC-DRAWINGS 1.1, 5): no photo route for it.
+      if ((await this.live(id)).kind === "drawing") throw missing();
+    } else {
+      if (!(await lstatOrNull(this.notePath(id, "dir", "trash")))?.isDirectory()) throw new HttpError(404, "There is no such note in the trash.");
+      if ((await this.kindOf(id, "trash"))?.kind === "drawing") throw missing();
+    }
     if (!RE.photoFile.test(file)) throw missing();
     const dirSt = await lstatOrNull(this.notePath(id, "note.assets", where));
     if (!dirSt?.isDirectory()) throw missing();
@@ -490,7 +577,7 @@ export class UserSpace {
 
   /** Stores a processed photo under a free name in the note's `note.assets/` (section 6). */
   async storePhoto(id: string, base: string, ext: string, data: Buffer): Promise<string> {
-    await this.live(id);
+    if ((await this.live(id)).kind === "drawing") throw new HttpError(404, "A drawing keeps its images inside its file.");
     const dir = this.notePath(id, "note.assets");
     const st = await lstatOrNull(dir);
     if (st && !st.isDirectory()) throw new HttpError(409, "The note's photo folder is not a folder.");

@@ -4,7 +4,7 @@
 // folder. Symbolic links are refused by `safefs`.
 
 import path from "node:path";
-import { RE } from "../../contract/src/index.ts";
+import { RE, type Kind } from "../../contract/src/index.ts";
 import { registerRoot } from "./safefs.ts";
 
 export class PathError extends Error {
@@ -22,11 +22,17 @@ export function inside(dir: string, part: string): string {
 export type NotePart =
   | "dir"
   | "note.md"
+  | "drawing.excalidraw"
   | "note.assets"
   | "history"
   | "trashed.json"
   | { asset: string }
-  | { version: string };
+  | { version: string; kind: Kind };
+
+/** Each kind's main file, which decides the kind of a folder (SPEC-DRAWINGS 4.1). */
+export const MAIN_FILE = { note: "note.md", drawing: "drawing.excalidraw" } as const satisfies Record<Kind, NotePart>;
+/** Each kind's file extension, of the main file and of its history versions. */
+export const EXT: Record<Kind, string> = { note: ".md", drawing: ".excalidraw" };
 
 export class DataLayout {
   readonly root: string;
@@ -105,13 +111,13 @@ export class UserLayout {
     const dir = inside(where === "notes" ? this.notes : this.trash, noteId);
     let p: string;
     if (part === "dir") p = dir;
-    else if (part === "note.md" || part === "note.assets" || part === "history" || part === "trashed.json") p = inside(dir, part);
+    else if (part === "note.md" || part === "drawing.excalidraw" || part === "note.assets" || part === "history" || part === "trashed.json") p = inside(dir, part);
     else if ("asset" in part) {
       if (!RE.photoFile.test(part.asset)) throw new PathError("not a photo name");
       p = inside(inside(dir, "note.assets"), part.asset);
     } else {
       if (!RE.version.test(part.version)) throw new PathError("not a version");
-      p = inside(inside(dir, "history"), `${part.version}.md`);
+      p = inside(inside(dir, "history"), `${part.version}${EXT[part.kind]}`);
     }
     const rel = path.relative(this.root, p);
     if (rel.startsWith("..") || path.isAbsolute(rel)) throw new PathError("path leaves the user's folder");

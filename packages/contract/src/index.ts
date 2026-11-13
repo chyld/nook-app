@@ -110,8 +110,9 @@ export const KIND_LIMITS: Record<Kind, { bytes: number; history: number }> = {
   note: { bytes: LIMITS.noteBytes, history: LIMITS.history },
   drawing: { bytes: LIMITS.drawingBytes, history: LIMITS.drawingHistory },
 };
-/** The largest document of either kind: the limit of the routes that take one. */
-const DOCUMENT_LIMIT = Math.max(LIMITS.noteBytes, LIMITS.drawingBytes);
+/** The limit of the routes that take a document: the larger kind's, with room so that the
+ *  kind's own check answers (with the size) rather than the route's (as for photos). */
+const DOCUMENT_LIMIT = Math.max(LIMITS.noteBytes, LIMITS.drawingBytes) + 64 * KB;
 
 // --- shapes -----------------------------------------------------------------------------------
 

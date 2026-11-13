@@ -345,3 +345,23 @@ Chromium through Playwright (with internet access). Found:
   route's body kind and sent a Markdown body only to a `"markdown"` route; it now does the same
   for a `"document"` route, the new name section 5 gives the body of a save. Without that it
   sends JSON to the save route, which is refused with 415 before the session is looked at.
+
+## Section 4 and 5: the server
+
+- The two document routes take up to 25 MB **plus 64 KB** (as the photo route has), so that a
+  drawing just over 25 MB is refused by the kind's own check, whose 413 carries the drawing's
+  size (`size`, `limit` beside `error`), rather than by Fastify's route limit.
+- `PUT /api/notes/:id` checks, in order: the item exists (404, 410); the body type is the item's
+  kind (415); the bytes are within that kind's limit (413); the revision (409); then the rest of
+  the new bytes (422). A note's 413 now comes after 404 and 410 (it came first, from the route
+  limit of 2 MB); for a note within 2 MB nothing changes.
+- The 422 codes of a drawing are `not-utf8`, `not-json` (not JSON, or JSON that is not an
+  object) and `not-excalidraw` (no `type` "excalidraw" or no array `elements`).
+- A folder whose `note.md` is not a regular file but whose `drawing.excalidraw` is, is a
+  drawing (4.1: "without one" is read as without a regular `note.md`).
+- Save as a new drawing with images filled in from the source writes the draft's JSON again
+  with `files` replaced (its other keys as sent); without anything to fill in, the bytes are
+  kept as sent. Only a source that is a drawing gives images.
+- The photo upload answers 404 for a drawing once the photo has passed its type check (a file
+  that is not an image is still 422 first, as for a note); asset routes answer 404 for a live or
+  trashed drawing.
