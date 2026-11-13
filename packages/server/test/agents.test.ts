@@ -9,7 +9,8 @@ import * as fs from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { AGENT_BASE, DRAWING_TYPE, LIMITS, MB, RE, routes, type RouteDef } from "../../contract/src/index.ts";
-import { serializeDrawing } from "../../core/src/index.ts";
+import { noteSpacing, serializeDrawing } from "../../core/src/index.ts";
+import { renderNote } from "../../../noteformat/src/index.ts";
 import { faults } from "../src/fsutil.ts";
 import { Agents } from "../src/agents.ts";
 import { Client, HOST, ls, ORIGIN, PASSWORD, startServer, type TestServer } from "./http.ts";
@@ -1101,4 +1102,54 @@ test("the guide: it names every route, every error code and what a token cannot 
     for (const b of e.boundElements) assert.ok(byId.has(b.id), `${e.id} names ${b.id}, which is there`);
   }
   for (const key of ["seed", "versionNonce", "index"]) assert.equal(new Set(example.elements.map((e: Record<string, unknown>) => e[key])).size, example.elements.length, key);
+});
+
+test("the guide: its formatting example is a note the format reads as the guide says, and what it says is not read is not", async () => {
+  const { s, a } = await setup();
+  const guide = (await s.app.inject({ method: "GET", url: A, headers: { host: HOST } })).body;
+  const example = [...guide.matchAll(/```markdown\n([\s\S]*?)```/g)].map((m) => m[1]).find((t) => t.includes("spacing:"))!;
+  assert.ok(example, "the formatting example");
+  // An agent can create it as it stands: it has its own front matter.
+  const made = await a.create(example);
+  assert.equal(made.statusCode, 201, made.body);
+  assert.deepEqual([made.json().entry.title, made.json().entry.tags, made.json().entry.problem], ["Lisbon trip", ["travel"], undefined]);
+  assert.equal(made.json().text, example);
+  const { html, meta } = renderNote(example);
+  // Every form in it is read: no brace is left showing, and each style is where the guide puts it.
+  assert.equal(/[{}]/.test(html), false, html);
+  assert.equal(html.includes("]"), false, "no bracket of a span is left showing");
+  assert.match(html, /<h1 style="color: var\(--note-indigo\)">Lisbon trip<\/h1>/, "a block line under a heading");
+  assert.match(html, /<span style="color: var\(--note-red\)">Friday the 14th<\/span>/, "a span");
+  assert.match(html, /<u>book the tram tickets<\/u>/, "++underline++");
+  assert.match(html, /<mark>sunscreen<\/mark>/, "==highlight==");
+  assert.match(html, /<span style="background-color: var\(--note-mint\)">window seat<\/span>/);
+  assert.match(html, /<span style="color: var\(--note-white\); background-color: var\(--note-red\); font-size: 1\.25em"><strong>Do not forget the passport<\/strong><\/span>/, "three keys round bold");
+  assert.match(html, /<p style="color: var\(--note-gray\); font-size: 0\.875em">This paragraph is grey and small/, "a block line under a paragraph");
+  assert.match(html, /<td[^>]*><span style="color: var\(--note-green\)">yes<\/span><\/td>/, "a span in a table cell");
+  assert.match(html, /<td[^>]*><mark>no<\/mark><\/td>/);
+  assert.deepEqual([meta.font, meta.size], ["serif", "17px"]);
+  assert.equal(noteSpacing(example), 1.5);
+  // Every colour, size and generic font the table names is one the format takes.
+  const row = (key: string) => new RegExp("^\\| `" + key + "` \\| (.*) \\|$", "m").exec(guide)![1];
+  const words = (cell: string) => [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  const colours = words(row("color")).filter((w) => !w.startsWith("#"));
+  assert.equal(colours.length, 14);
+  for (const c of colours) assert.ok(renderNote(`[x]{color=${c}}`).html.includes(`color: var(--note-${c})`), c);
+  assert.ok(renderNote("[x]{color=#2b6cb0}").html.includes("color: #2b6cb0"));
+  assert.ok(/background-color/.test(renderNote("[x]{bg=highlight}").html) || renderNote("[x]{bg=highlight}").html.includes("<mark>"));
+  for (const size of ["xs", "small", "normal", "large", "xl", "xxl", "6px", "200px", "14pt"]) {
+    assert.ok(words(row("size")).includes(size), size);
+    const out = renderNote(`[x]{size=${size}}`).html;
+    assert.ok(size === "normal" ? !/[{}]/.test(out) : out.includes("font-size"), `${size}: ${out}`);
+  }
+  for (const font of ["serif", "sans", "mono"]) assert.ok(renderNote(`[x]{font=${font}}`).html.includes("font-family"), font);
+  assert.ok(renderNote('[x]{font="Source Serif 4"}').html.includes("Source Serif 4"));
+  assert.match(renderNote("[x]{underline=yes}").html, /underline|<u>/);
+  // What the guide says is not read is shown as typed, or shown plain.
+  for (const typed of ["{color = red}", "{Color=red}"]) assert.ok(renderNote(`A line.\n${typed}\n`).html.includes(typed), typed);
+  assert.equal(/crimson|[{}\]]/.test(renderNote("[x]{color=crimson}").html), false, "an unknown colour: a plain x, no braces");
+  assert.ok(renderNote("<b>x</b>").html.includes("&lt;b&gt;"), "HTML is shown as typed");
+  // A block line does not style a list; a span in a list item does.
+  assert.ok(renderNote("- one\n- two\n{color=red}\n").html.includes("{color=red}"));
+  assert.ok(renderNote("- [one]{color=red}\n").html.includes("color: var(--note-red)"));
 });

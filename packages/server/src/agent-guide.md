@@ -72,6 +72,68 @@ Answer, status 201: `{ "id": "…", "revision": "…", "entry": { … }, "text":
 - Always use `--data-binary`. Plain `-d` removes the line breaks.
 - If the answer to a create is lost, list before you send it again, or you make two notes.
 
+## Formatting a note
+
+The body of a note is Markdown: headings, **bold**, *italic*, ~~strikethrough~~, lists, task
+lists (`- [ ]`, `- [x]`), tables, quotes, code, links. HTML is not read: `<b>x</b>` is shown as
+typed. Plain Markdown is enough for most notes. For colour, size, fonts, underline and
+highlight, Nook adds the forms in this example, which is a complete note:
+
+```markdown
+---
+title: "Lisbon trip"
+tags: [travel]
+created: 2026-11-12
+font: serif
+size: 17px
+spacing: 1.5
+---
+
+# Lisbon trip
+{color=indigo}
+
+Leave on [Friday the 14th]{color=red}, and ++book the tram tickets++ before then.
+Pack ==sunscreen== and the [window seat]{bg=mint} confirmation.
+
+[**Do not forget the passport**]{color=white bg=red size=large}
+
+This paragraph is grey and small, set by the line under it.
+{color=gray size=small}
+
+| Item    | Paid               |
+|:--------|:-------------------|
+| Flights | [yes]{color=green} |
+| Hotel   | ==no==             |
+```
+
+- **A styled span** is `[text]{key=value key=value}`: brackets round the text, then braces. It
+  works anywhere text does: in a paragraph, a list item, a table cell, a heading, and round
+  other formatting such as `**bold**`.
+- **A block line** is a line holding only `{key=value}`, straight under a heading or as the
+  last line of a paragraph, with an empty line after it. It styles the whole heading or
+  paragraph. It does not work under a list, a table or a quote: use spans there.
+- **Shorthand:** `++text++` is underline and `==text==` is highlight.
+- **For the whole note,** in the front matter: `font`, `size`, and `spacing` (the gap between
+  paragraphs, a number from 0 to 5; 1 is the usual gap).
+
+| Key | Values |
+|---|---|
+| `color` | `red`, `orange`, `yellow`, `green`, `mint`, `teal`, `blue`, `indigo`, `purple`, `pink`, `brown`, `gray`, `black`, `white`, or a hex colour such as `#2b6cb0` |
+| `bg` | the same, or `highlight` |
+| `size` | `xs`, `small`, `normal`, `large`, `xl`, `xxl`; or pixels from `6px` to `200px`; or points such as `14pt` |
+| `font` | `serif`, `sans`, `mono`; or the name of a font the person has added on Nook's Fonts screen, in quotes when it has a space: `font="Source Serif 4"` |
+| `underline` | `yes` or `no` |
+
+The syntax is strict, and a mistake is never reported: it is only shown.
+
+- Write `key=value` with nothing round the `=`, keys in lower case, and one space between
+  pairs. `{color = red}` and `{Color=red}` are not read, and the braces show in the note as
+  typed.
+- A key or value that is not in the table is ignored: `[x]{color=crimson}` shows a plain `x`.
+  Prefer the named colours to hex: they stay readable in the dark theme.
+- A font the person has not added leaves the text in its usual font.
+- Under an image, a line such as `{width=70%}` is the photo's width. Keep it as it is.
+
 ## Read
 
 ```sh
