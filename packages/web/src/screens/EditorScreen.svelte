@@ -73,7 +73,9 @@
     if (!v) return false;
     const cell = activeCell();
     if (cell) {
+      // In a cell: the single settings, and a saved style, which is those settings together (SPEC-CELLS).
       if (i.type === "setMark") cell.style(i.change);
+      else if (i.type === "applyStyle") cell.applyStyle(i.style);
       else toasts.push("This works on the note's text, not inside a table cell.", "info");
       refresh();
       return true;

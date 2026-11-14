@@ -98,8 +98,17 @@
     send({ type: "setLink", href: url });
     refocus();
   }
-  /** After a field of the toolbar (the link address, the size box), the editor has the focus again. */
+  /** After a field of the toolbar (the link address, the size box), the editor has the focus
+   *  again. In a table cell the cell takes it back itself when it is drawn again; handing it to
+   *  the note's text there would send the next control to the note (SPEC-CELLS 2.8). */
   function refocus() {
+    if (inCell) {
+      // (A size the cell refused draws nothing again: the cell is given the focus back here.)
+      queueMicrotask(() => {
+        if (document.activeElement?.closest("[data-toolbar]")) (document.querySelector('[data-testid="table-cell"].is-editing') as HTMLElement | null)?.focus();
+      });
+      return;
+    }
     queueMicrotask(() => (document.querySelector(".cm-content") as HTMLElement | null)?.focus());
   }
 

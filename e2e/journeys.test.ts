@@ -246,6 +246,83 @@ test("edit a table: type in a cell, Tab to the next, add a row and a column, sty
   await close();
 });
 
+test("a saved style in a table cell: two styles in two cells, one undo, the size box, typing after (SPEC-CELLS)", async () => {
+  const { p, errors, close } = await fresh();
+  // Two saved styles, as the Styles screen would save them.
+  const saved = await p.evaluate(async () => {
+    const base = { bold: false, italic: false, underline: false, strike: false, size: null, font: null, color: null, bg: null };
+    const put = (style: Record<string, unknown>) => fetch(`/api/styles/${encodeURIComponent(String(style.name))}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style }) }).then((r) => r.status);
+    return [await put({ ...base, name: "Loud", bold: true, size: 18, color: "red" }), await put({ ...base, name: "Quiet", italic: true, color: "blue" })];
+  });
+  assert.deepEqual(saved, [200, 200]);
+  await p.reload();
+  await p.getByTestId("sidebar").waitFor();
+  await newNote(p);
+  await clickEditor(p);
+  await p.keyboard.type("Table:");
+  await p.getByTestId("cmd-insert").click();
+  await p.locator('[data-testid="menu-item"][data-value="table"]').click();
+  await p.getByTestId("table").waitFor();
+  const cell = (r: number, c: number) => p.locator(`[data-testid="table-cell"][data-row="${r}"][data-col="${c}"]`);
+  const pick = async (name: string) => {
+    await p.getByTestId("cmd-styles").click();
+    await p.locator(`[data-testid="menu-item"][data-value="${name}"]`).click();
+  };
+  const has = (part: string) => p.waitForFunction((x) => (window as unknown as { __notes: { text(): string } }).__notes.text().includes(x), part);
+  await cell(1, 0).click();
+  await p.keyboard.type("apples");
+  await p.keyboard.press("Tab");
+  await p.keyboard.type("pears");
+  // With only the caret in the cell: the whole cell takes the style, and no message refuses it.
+  await cell(1, 0).click();
+  await pick("Loud");
+  await has("| [**apples**]{size=18pt color=red} |");
+  assert.equal(await p.getByText("not inside a table cell").count(), 0);
+  // What is typed next is added to the cell's text, not put in its place.
+  await p.keyboard.type("!");
+  await cell(1, 1).click();
+  await has("[**apples!**]{");
+  // Another style in another cell, with its text selected.
+  await p.keyboard.press("Control+a");
+  await pick("Quiet");
+  await has("| [*pears*]{color=blue} |");
+  let md = await notesText(p);
+  assert.match(md, /\| \[\*\*apples!\*\*\]\{[^}]*color=red[^}]*\} \| \[\*pears\*\]\{color=blue\} \|/, "each cell has its own style");
+  // The style is drawn in the cell.
+  const drawn = await cell(1, 1).evaluate((el) => {
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let t: Node | null;
+    while ((t = w.nextNode())) if ((t.textContent ?? "").trim()) break;
+    return getComputedStyle(t?.parentElement ?? el).fontStyle;
+  });
+  assert.equal(drawn, "italic");
+  // One undo takes the whole style back.
+  await clickEditor(p);
+  await p.keyboard.press("Control+z");
+  await p.waitForFunction(() => !(window as unknown as { __notes: { text(): string } }).__notes.text().includes("color=blue"));
+  assert.ok((await notesText(p)).includes("| pears |"), "the cell is plain again after one undo");
+  // The size box, then another control: both land in the cell, and nothing goes to the note's text.
+  await cell(1, 1).click();
+  await p.getByTestId("cmd-size").fill("16");
+  await p.getByTestId("cmd-size").press("Enter");
+  await has("size=16pt");
+  await p.getByTestId("cmd-italic").click();
+  await has("[*pears*]{size=16pt}");
+  md = await notesText(p);
+  assert.ok(md.includes("Table:\n"), "the note's own text is as it was");
+  // The same style picked twice changes nothing the second time; the pick after it still lands.
+  await pick("Loud");
+  await has("size=18pt color=red");
+  await pick("Loud");
+  await pick("Quiet");
+  await has("| [*pears*]{color=blue} |");
+  // Default (reset) clears the cell.
+  await pick("reset");
+  await p.waitForFunction(() => /\| pears \|/.test((window as unknown as { __notes: { text(): string } }).__notes.text()));
+  assert.deepEqual(policyErrors(errors), []);
+  await close();
+});
+
 test("conflict in two tabs: Keep mine, then Take theirs", async () => {
   const one = await fresh();
   const id = await newNote(one.p);

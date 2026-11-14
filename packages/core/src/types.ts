@@ -61,6 +61,8 @@ export type TableOp =
   | { op: "setCell"; row: number; col: number; runs: CellRun[] }
   | { op: "setCellSource"; row: number; col: number; markdown: string }
   | { op: "styleCell"; row: number; col: number; from: number; to: number; change: Change }
+  /** A saved style, or the reset, on a cell's text: all its settings as one change (SPEC-CELLS). */
+  | { op: "applyStyleCell"; row: number; col: number; from: number; to: number; style: SavedStyle | "reset" }
   | { op: "addRow"; after: number }
   | { op: "removeRow"; row: number }
   | { op: "addColumn"; after: number }

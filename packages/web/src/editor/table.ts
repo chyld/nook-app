@@ -5,7 +5,7 @@
 // cell's content as `pending`, so the cell and the operation are one edit and one undo step.
 
 import type { EditorView } from "@codemirror/view";
-import { cellChars, cellMarkdown, parseTable, PLAIN, type CellRun, type CellStyle, type Change, type PendingCell, type TableOp } from "../../../core/src/index.ts";
+import { cellChars, cellMarkdown, parseTable, PLAIN, type CellRun, type CellStyle, type Change, type PendingCell, type SavedStyle, type TableOp } from "../../../core/src/index.ts";
 import { dispatchIntent, notify } from "./dispatch.ts";
 import { editorField, richOptions } from "./field.ts";
 
@@ -24,6 +24,8 @@ export interface ActiveCell {
   /** False for a cell edited as its Markdown text: the toolbar's styles do not apply. */
   rich: boolean;
   style(change: Change): void;
+  /** A saved style, or the reset, on the selection in the cell or on the whole cell (SPEC-CELLS). */
+  applyStyle(style: SavedStyle | "reset"): void;
   /** Leaves the cell, writing what was typed in it. */
   leave(): void;
   /** Writes what was typed in the cell if it changed; the cell keeps the focus otherwise. */
@@ -398,6 +400,9 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       // keep), so it was not drawn again: these cells are still the live ones.
       gone = false;
       for (const c of cells.flat()) if (c.el === document.activeElement) c.reenter?.();
+      // The cell that was being styled is still the one the toolbar works on (the same style
+      // picked twice changes nothing; the next pick must still reach the cell).
+      if (was && was.connected() && !active) setActive(was);
     }
     refocus(view);
     return true;
@@ -454,6 +459,26 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       const trimmed = shown.slice(lead);
       return (kept = [toCodePoints(trimmed, a), toCodePoints(trimmed, b)]);
     };
+    /** A style operation on the selection in the cell, or on the whole cell with only the caret
+     *  there. The selection is put back afterwards, a caret as a caret (so that what is typed next
+     *  is added to the cell's text, not put in its place). */
+    const styled = (op: (from: number, to: number) => TableOp): void => {
+      if (gone || focus.editing !== c) return;
+      if (!c.rich) {
+        notify("This cell is edited as Markdown: type the marks, or use Edit as text.");
+        return;
+      }
+      const [from, to] = selection();
+      const p = pendingOf(c);
+      if (p === null) return;
+      // As UTF-16 offsets of the cell's own text, the spaces kept at its start counted (the
+      // selection was read without them).
+      const shown = (el.textContent ?? "").replace(/\u00a0/g, " ");
+      const lead = shown.length - shown.trimStart().length;
+      const text = shown.slice(lead);
+      const back: [number, number] = [lead + toUtf16(text, from), lead + toUtf16(text, to)];
+      send(op(from, to), p, { row: c.row, col: c.col, sel: back });
+    };
     const handle: ActiveCell = {
       rich: c.rich,
       source: () => {
@@ -465,18 +490,10 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       },
       selection,
       style(change: Change) {
-        if (gone || focus.editing !== c) return;
-        if (!c.rich) {
-          notify("This cell is edited as Markdown: type the marks, or use Edit as text.");
-          return;
-        }
-        const [from, to] = selection();
-        const p = pendingOf(c);
-        if (p === null) return;
-        const shownNow = (el.textContent ?? "").replace(/ /g, " ").trim();
-        // The selection is put back afterwards, as UTF-16 offsets of what the cell shows.
-        const back: [number, number] = from === to ? [0, shownNow.length] : [toUtf16(shownNow, from), toUtf16(shownNow, to)];
-        send({ op: "styleCell", row: c.row, col: c.col, from, to, change }, p, { row: c.row, col: c.col, sel: back });
+        styled((from, to) => ({ op: "styleCell", row: c.row, col: c.col, from, to, change }));
+      },
+      applyStyle(style: SavedStyle | "reset") {
+        styled((from, to) => ({ op: "applyStyleCell", row: c.row, col: c.col, from, to, style }));
       },
       leave: () => leave(),
       flush: () => {

@@ -555,6 +555,34 @@ function styleInCell(source: string, from: number, to: number, change: Change): 
   return { ok: true, text: r.text, from: r.from ?? from, to: r.to ?? to };
 }
 
+/**
+ * A saved style on a cell's text (SPEC-CELLS): each of its settings in turn, as `useStyle` gives
+ * them to a selection, through `styleInCell`, which sets. With nothing selected, the whole cell.
+ * A style that names no size gives the size cells have, so a size of the text's own goes and
+ * none is written. A setting the cell cannot hold is left out, with its reason.
+ */
+function styleCellWith(source: string, from: number, to: number, style: SavedStyle | "reset"): { ok: true; text: string; from: number; to: number; left: string[] } | { ok: false; reason: string } {
+  if (shownLength(source) === 0) return { ok: false, reason: "type something in the cell first" };
+  const base = (cellChars("x") ?? [])[0]?.style.size ?? 12;
+  const changes: Change[] = style === "reset" ? [{ kind: "clear" }] : changesOf(style, base);
+  let cur = source;
+  let done = 0;
+  const left: string[] = [];
+  for (const c of changes) {
+    const r = styleInCell(cur, from, to, c);
+    if (!r.ok) {
+      left.push(r.reason);
+      continue;
+    }
+    cur = r.text;
+    from = r.from;
+    to = r.to;
+    done++;
+  }
+  if (!done) return { ok: false, reason: left[0] ?? "this style cannot be written in a table cell" };
+  return { ok: true, text: cur, from, to, left: [...new Set(left)] };
+}
+
 function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: PendingCell): Step {
   const t = tableAt(m, at);
   if (!t) return { reason: "there is no table here" };
@@ -571,6 +599,8 @@ function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: Pendin
   }
   let cellSel: { row: number; col: number; from: number; to: number } | null = null;
   let shape = false;
+  // The settings of a saved style that the cell could not hold, each with its reason.
+  let left: string[] = [];
   switch (op.op) {
     case "setCell":
     case "setCellSource": {
@@ -590,6 +620,17 @@ function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: Pendin
       g = setCellIn(g, op.row, op.col, r.text)!;
       named.add(`${op.row}:${op.col}`);
       cellSel = { row: op.row, col: op.col, from: r.from, to: r.to };
+      break;
+    }
+    case "applyStyleCell": {
+      const src = g.rows[op.row]?.[op.col];
+      if (src === undefined) return { reason: "there is no such cell" };
+      const r = styleCellWith(src, Math.min(op.from, op.to), Math.max(op.from, op.to), op.style);
+      if (!r.ok) return { reason: r.reason };
+      g = setCellIn(g, op.row, op.col, r.text)!;
+      named.add(`${op.row}:${op.col}`);
+      cellSel = { row: op.row, col: op.col, from: r.from, to: r.to };
+      left = r.left;
       break;
     }
     case "addRow":
@@ -632,7 +673,7 @@ function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: Pendin
     }
   } else if (!shapeKept(t.grid, back, op, named)) return { reason: "another cell would change; use Edit as text" };
   void cellSel;
-  return { text: r.text, sel: mapSel(doc.sel, doc.text, r.text) };
+  return { text: r.text, sel: mapSel(doc.sel, doc.text, r.text), ...(left.length ? { skipped: { count: left.length, reasons: left } } : {}) };
 }
 
 /** For row and column operations: the cells outside the added or removed row or column hold
