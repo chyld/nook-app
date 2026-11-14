@@ -1152,8 +1152,11 @@ test("the guide: its formatting example is a note the format reads as the guide 
   const { html, meta } = renderNote(example);
   // Every form in it is read: no brace is left showing, and each style is where the guide puts it.
   assert.equal(/[{}]/.test(html), false, html);
-  assert.equal(html.replace(/<pre>[\s\S]*?<\/pre>/g, "").includes("]"), false, "no bracket of a span is left showing");
-  assert.match(html, /<h1 style="color: var\(--note-indigo\)">Lisbon trip<\/h1>/, "a block line under a heading");
+  assert.equal(html.includes("]"), false, "no bracket of a span is left showing");
+  // It teaches no heading, quote or code block (SPEC-PLAIN 5.4): none is in it, as written or as read.
+  assert.equal(/<(h[1-6]|blockquote|pre)\b/.test(html), false, "no heading, quote or code block is drawn");
+  assert.deepEqual(example.split("\n").filter((line) => /^ {0,3}(#{1,6}(\s|$)|>|```|~~~|=+\s*$)/.test(line)), [], "no line of it starts one");
+  assert.match(html, /<p style="color: var\(--note-indigo\)"><strong>To do<\/strong><\/p>/, "a block line under a one-line paragraph");
   assert.match(html, /<span style="color: var\(--note-red\)">Friday the 14th<\/span>/, "a span");
   assert.match(html, /<u>book the tram tickets<\/u>/, "++underline++");
   assert.match(html, /<mark>sunscreen<\/mark>/, "==highlight==");
@@ -1162,6 +1165,17 @@ test("the guide: its formatting example is a note the format reads as the guide 
   assert.match(html, /<p style="color: var\(--note-gray\); font-size: 0\.875em">This paragraph is grey and small/, "a block line under a paragraph");
   assert.match(html, /<td[^>]*><span style="color: var\(--note-green\)">yes<\/span><\/td>/, "a span in a table cell");
   assert.match(html, /<td[^>]*><mark>no<\/mark><\/td>/);
+  assert.match(html, /<th style="text-align: left">Item<\/th>\s*<th style="text-align: right">Cost \(EUR\)<\/th>\s*<th style="text-align: center">Paid<\/th>/, "the table and how its columns are lined up");
+  assert.match(html, /<span style="font-size: 1\.25em"><strong>Costs<\/strong><\/span>/, "a large bold label in place of a heading");
+  assert.match(html, /<input type="checkbox" disabled checked> Renew the passport/, "a task that is done");
+  assert.match(html, /<input type="checkbox" disabled> Buy insurance\s*<ul>\s*<li>compare <span style="color: var\(--note-blue\)">two offers<\/span><\/li>/, "a bullet inside a task, with a span");
+  assert.match(html, /<ol>\s*<li>Book the flights<\/li>\s*<li>Reserve the hotel\s*<ul>\s*<li>near Alfama<\/li>/, "a numbered list with a bullet inside");
+  assert.match(html, /<code>convert --eur<\/code>/, "inline code");
+  assert.match(html, /<code>750<\/code>/);
+  assert.match(html, /<em>&quot;Saudade&quot; has no exact translation/, "italic");
+  assert.match(html, /<del>the umbrella<\/del>/, "~~strikethrough~~");
+  assert.match(html, /<a href="https:\/\/example\.com\/lisbon">the city guide<\/a>/, "a link");
+  assert.match(html, /<hr>/, "the horizontal line");
   assert.deepEqual([meta.font, meta.size], ["serif", "17px"]);
   assert.equal(noteSpacing(example), 1.5);
   // Every colour, size and generic font the table names is one the format takes.
@@ -1194,8 +1208,13 @@ test("the guide: every thing the editor offers is in its table, written as the f
   const guide = (await s.app.inject({ method: "GET", url: A, headers: { host: HOST } })).body;
   const section = guide.slice(guide.indexOf("## Formatting a note"), guide.indexOf("## Read"));
   // The toolbar of SPEC2 9.4, the header and Note settings: each has a row.
-  const offered = ["Title, tags", "Bold", "Italic", "Underline", "Strikethrough", "Inline code", "Text colour", "Highlight", "Font", "Size", "Link", "Normal text", "Heading 1 to 6", "Quote", "Code block", "Bullets", "Numbers", "Tasks", "Table", "Horizontal line", "Photo", "Saved styles", "Note settings: font, size, paragraph spacing"];
+  const offered = ["Title, tags", "Bold", "Italic", "Underline", "Strikethrough", "Inline code", "Text colour", "Highlight", "Font", "Size", "Link", "Normal text", "Bullets", "Numbers", "Tasks", "Table", "Horizontal line", "Photo", "Saved styles", "Note settings: font, size, paragraph spacing"];
   for (const name of offered) assert.ok(section.includes(`| ${name} |`), `a row for ${name}`);
+  // SPEC-PLAIN 5.4: the editor makes no heading, quote or code block, so the guide has no row
+  // for one and says so where the section starts; it does not say that one is refused.
+  for (const name of ["Heading", "Quote", "Code block"]) assert.equal(new RegExp("^\\| " + name, "m").test(section), false, `no row for ${name}`);
+  assert.match(section.slice(0, section.indexOf("### ")).replace(/\s+/g, " "), /Nook has no headings, quotes or code blocks: write normal paragraphs, lists and tables\. A note that already has one keeps it, and nothing you send is refused for containing one\./);
+  for (const taught of ["# Heading", "> text", "three backticks"]) assert.equal(section.includes(taught), false, `${taught} is not taught`);
   // Each form the table and the details give is read as they say.
   const reads: [source: string, shown: RegExp][] = [
     ["**text**", /<strong>text<\/strong>/],
@@ -1211,11 +1230,6 @@ test("the guide: every thing the editor offers is in its table, written as the f
     ["[text](https://example.com)", /<a href="https:\/\/example\.com">text<\/a>/],
     ["see https://example.com now", /<a href="https:\/\/example\.com">/],
     ["one\n\ntwo", /<p>one<\/p>\s*<p>two<\/p>/],
-    ["# Heading", /<h1>Heading<\/h1>/],
-    ["###### Heading", /<h6>Heading<\/h6>/],
-    ["> text\n> more", /<blockquote>\s*<p>text\nmore<\/p>/],
-    ["```\ncode **x**\n```", /<pre><code>code \*\*x\*\*\n<\/code><\/pre>/],
-    ["~~~python\nx = 1\n~~~", /<pre><code class="language-python">x = 1/],
     ["- item", /<ul>\s*<li>item<\/li>/],
     ["1. item", /<ol>\s*<li>item<\/li>/],
     ["- [ ] to do\n- [x] done", /<input type="checkbox" disabled> to do[\s\S]*<input type="checkbox" disabled checked> done/],
@@ -1233,10 +1247,20 @@ test("the guide: every thing the editor offers is in its table, written as the f
     ["![x](https://example.com/a.png)", /<span class="note-image-placeholder"[^>]*>x<\/span>/],
     ["<b>x</b> and <br>", /&lt;b&gt;x&lt;\/b&gt; and &lt;br&gt;/],
     ["[a [link](https://x.example) b]{color=red}", /<span style="color: var\(--note-red\)">a <a href="https:\/\/x\.example">link<\/a> b<\/span>/],
+  ];
+  for (const [source, shown] of reads) assert.match(renderNote(source).html, shown, JSON.stringify(source));
+  // Not taught any more, and still read: a note that already has a heading, a quote or a code
+  // block keeps it (SPEC-PLAIN 3: the format and its reader are not changed).
+  const kept: [source: string, shown: RegExp][] = [
+    ["# Heading", /<h1>Heading<\/h1>/],
+    ["###### Heading", /<h6>Heading<\/h6>/],
+    ["> text\n> more", /<blockquote>\s*<p>text\nmore<\/p>/],
+    ["```\ncode **x**\n```", /<pre><code>code \*\*x\*\*\n<\/code><\/pre>/],
+    ["~~~python\nx = 1\n~~~", /<pre><code class="language-python">x = 1/],
     ["> a [quote]{color=red}", /<blockquote>\s*<p>a <span style="color: var\(--note-red\)">quote<\/span>/],
     ["# A [red]{color=red} heading", /<h1>A <span style="color: var\(--note-red\)">red<\/span> heading<\/h1>/],
   ];
-  for (const [source, shown] of reads) assert.match(renderNote(source).html, shown, JSON.stringify(source));
+  for (const [source, shown] of kept) assert.match(renderNote(source).html, shown, JSON.stringify(source));
   // A span inside a span, and two sets of braces, are not read: the guide says to use one.
   assert.ok(renderNote("[[x]{color=red}]{bg=mint}").html.includes("]{bg=mint}"));
   assert.ok(renderNote("[x]{color=red}{bg=mint}").html.includes("{bg=mint}"));

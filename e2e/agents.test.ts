@@ -214,8 +214,8 @@ test("the guide's formatting example, created by an agent, opens in the editor w
   // In Rich the styles are drawn and their marks are hidden: what is shown has no attribute
   // list, no span brackets and no shorthand marks left as typed.
   const shown = await p.getByTestId("editor").innerText();
-  for (const text of ["Lisbon trip", "Friday the 14th", "book the tram tickets", "sunscreen", "Do not forget the passport", "Renew the passport", "Saudade", "the city guide", "Flights"]) assert.ok(shown.includes(text), text);
-  for (const mark of ["{color", "{bg", "{size", "]{", "++book", "==sunscreen", "**Do not"]) assert.equal(shown.includes(mark), false, `${mark} is not left showing`);
+  for (const text of ["Friday the 14th", "book the tram tickets", "sunscreen", "Do not forget the passport", "To do", "Renew the passport", "near Alfama", "Saudade", "the city guide", "Costs", "Flights", "convert --eur"]) assert.ok(shown.includes(text), text);
+  for (const mark of ["{color", "{bg", "{size", "]{", "++book", "==sunscreen", "==no", "**Do not", "**To do", "**Costs", "*\"Saudade", "~~the", "- [", "1. Book", "|", "`convert"]) assert.equal(shown.includes(mark), false, `${mark} is not left showing`);
   // A styled piece has the colour the guide says: the red span is drawn in the note's red.
   const colour = await p.evaluate(() => {
     const walker = document.createTreeWalker(document.querySelector('[data-testid="editor"]')!, NodeFilter.SHOW_TEXT);

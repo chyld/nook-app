@@ -1,5 +1,5 @@
 // `window.__notes.intent(i)` (SPEC2 11) is given intents by tests that know only the spec's
-// notation (7.3): `insertText(text)`, `setMark(change)`, `setBlock(kind)`... This turns the
+// notation (7.3): `insertText(text)`, `setMark(change)`, `setList(kind)`... This turns the
 // likely ways of writing one into the `Intent` shape, or null.
 
 import type { Intent } from "./types.ts";
@@ -29,7 +29,6 @@ export function normalizeIntent(i: unknown): Intent | null {
     }
     case "applyStyle":
       return { type, style: (o.style ?? arg) as never };
-    case "setBlock":
     case "setList":
       return typeof (o.kind ?? arg) === "string" ? ({ type, kind: (o.kind ?? arg) as never } as Intent) : null;
     case "setLink":

@@ -20,7 +20,7 @@ routines and tests (rule 4 of the brief: the code wins). Each line names the pla
   ported. That one function is ported alone, as `core/src/frontmatter.ts`.
 - 7.3 intents are objects with a `type` field named as in the spec, and the arguments named as
   in its notation: `{ type: "insertText", text }`, `{ type: "setMark", change }`,
-  `{ type: "setBlock", kind }`, `{ type: "setList", kind }`, `{ type: "setLink", href }`,
+  `{ type: "setList", kind }` (`setBlock` went on 2026-11-13: SPEC-PLAIN), `{ type: "setLink", href }`,
   `{ type: "insertBlock", what }`, `{ type: "insertPhoto", file }`,
   `{ type: "setImageWidth", at, value }`, `{ type: "toggleTask", at }`,
   `{ type: "tableEdit", at, op, pending? }`, `{ type: "setMeta", key, value }`,
@@ -668,3 +668,27 @@ selected" was plain.
   waiting made a plain quote, the marks having taken the look with them. The look of the
   marks goes on waiting for the text typed in the block (`shortcut` in `reduce.ts`).
 
+
+## Normal text only (2026-11-13)
+
+The owner's decision, in `SPEC-PLAIN.md` (option A): the editor no longer makes a heading, a
+quote or a code block. Nothing on disk is rewritten, and the note format is not changed.
+
+- **Removed:** the toolbar's Block style menu; the `setBlock` intent; `typing.block` (a block
+  waiting on an empty line), so `Typing` is `{ marks }` only; the `block` field of the
+  toolbar's state; the line-start shortcuts `# ` to `#### `, `> ` and three backticks, which
+  typed in Rich mode are now those characters as text; and pasting them: Markdown that holds
+  one of the three is pasted in Rich mode as plain lines.
+- **Kept for existing notes:** an old note, a version restored from History, Raw mode and an
+  agent can all still bring one in, so a heading, quote or code block that is there is drawn
+  and edited as before. The rules for editing inside one stay (Enter, Backspace, joining,
+  `leaveCode`). `setBlockStyle` now takes one target, `"paragraph"`: it only turns such a block
+  into normal text, as Backspace at the start of a heading or a quote does.
+- **Kept because lists use them:** `keepingStyle`, `withWaitingLook` and `lookOnBlock` in
+  `reduce.ts`. A list chosen with a saved style on the text, or with a look waiting at the
+  caret, keeps it as before. The list shortcuts `- `, `* `, `1. ` and `[] ` stay.
+- **Raw mode and agents are not refused.** `# x` typed in Raw mode or sent by an agent is a
+  heading, as the format says. The agent guide no longer teaches the three blocks.
+- **The sections above** about a saved style with a heading or a quote, and about a block
+  chosen at the caret or by its shortcut, now describe only the blocks of old notes: where
+  they say a heading or a quote is chosen or typed, only a list can be.

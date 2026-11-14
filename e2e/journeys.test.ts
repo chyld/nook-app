@@ -73,10 +73,10 @@ test("type and style in Rich, switch to Raw, save, reload", async () => {
   assert.equal(bodyOf(await notesText(p)), "Hello **world**");
   await p.keyboard.press("Control+i");
   assert.equal(bodyOf(await notesText(p)), "Hello ***world***");
-  // A heading from the block menu, a colour from its menu.
-  await p.getByTestId("cmd-block").click();
-  await p.locator('[data-testid="menu-item"][data-value="h2"]').click();
-  assert.equal(bodyOf(await notesText(p)), "## Hello ***world***");
+  // A bullet from the List menu.
+  await p.getByTestId("cmd-list").click();
+  await p.locator('[data-testid="menu-item"][data-value="bullet"]').click();
+  assert.equal(bodyOf(await notesText(p)), "- Hello ***world***");
   await p.getByTestId("save-status").and(p.locator('[data-state="dirty"]')).waitFor();
   // Raw: the same text, the same caret.
   await p.getByTestId("mode-toggle").click();
@@ -87,14 +87,46 @@ test("type and style in Rich, switch to Raw, save, reload", async () => {
   await p.reload();
   await p.getByTestId("editor").waitFor();
   await p.waitForFunction(() => (window as unknown as { __notes?: unknown }).__notes !== undefined);
-  assert.equal(bodyOf(await notesText(p)), "## Hello ***world***\n\nMore *text*");
+  assert.equal(bodyOf(await notesText(p)), "- Hello ***world***\n\nMore *text*");
   assert.equal(await p.getByTestId("editor").getAttribute("data-mode"), "raw", "the last mode is remembered");
   await p.getByTestId("mode-toggle").click();
   assert.equal(await p.getByTestId("editor").getAttribute("data-mode"), "rich");
   // The Raw preview renders the note.
   await p.getByTestId("mode-toggle").click();
   await p.getByTestId("tab-preview").click();
-  await p.getByTestId("preview").locator("h2").waitFor();
+  await p.getByTestId("preview").locator("ul li").waitFor();
+  await p.getByTestId("tab-write").click();
+  await p.getByTestId("mode-toggle").click();
+  assert.deepEqual(policyErrors(errors), []);
+  await close();
+});
+
+test("normal text only: no Block style menu; `# ` and `> ` typed in Rich stay as typed (SPEC-PLAIN 5.1, 5.2)", async () => {
+  const { p, errors, close } = await fresh();
+  await newNote(p);
+  assert.equal(await p.getByTestId("editor").getAttribute("data-mode"), "rich");
+  // The toolbar: the List and Insert menus, and no Block style menu.
+  await p.getByTestId("cmd-list").waitFor();
+  await p.getByTestId("cmd-insert").waitFor();
+  assert.equal(await p.getByTestId("cmd-block").count(), 0, "no Block style control");
+  await clickEditor(p);
+  await p.keyboard.type("# Title");
+  await p.keyboard.press("Enter");
+  await p.keyboard.type("> quoted");
+  // The file: both lines are there, and neither starts a heading or a quote.
+  const body = bodyOf(await notesText(p));
+  assert.ok(body.includes("# Title") && body.includes("> quoted"), JSON.stringify(body));
+  assert.deepEqual(body.split("\n").filter((line) => /^ {0,3}(#{1,6}(\s|$)|>)/.test(line)), [], JSON.stringify(body));
+  // The screen: the characters as typed, drawn as ordinary lines.
+  const shown = await p.getByTestId("editor").innerText();
+  assert.ok(shown.includes("# Title"), JSON.stringify(shown));
+  assert.ok(shown.includes("> quoted"), JSON.stringify(shown));
+  // Saved and opened again, it is still text: the preview draws no heading and no quote.
+  await save(p);
+  await p.getByTestId("mode-toggle").click();
+  await p.getByTestId("tab-preview").click();
+  await p.getByTestId("preview").getByText("# Title").waitFor();
+  assert.equal(await p.getByTestId("preview").locator("h1, h2, h3, h4, h5, h6, blockquote, pre").count(), 0);
   await p.getByTestId("tab-write").click();
   await p.getByTestId("mode-toggle").click();
   assert.deepEqual(policyErrors(errors), []);

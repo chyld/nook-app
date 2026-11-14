@@ -5,10 +5,12 @@
 
 import { styleKey, type RunStyle } from "../../../../noteformat/src/index.ts";
 import { buildModel, type BlockModel, type Model } from "./model.ts";
-import { escapeText, Patch } from "./edits.ts";
+import { Patch } from "./edits.ts";
 import { isBlank } from "./blank.ts";
 
-export type BlockTarget = "paragraph" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "quote" | "code";
+/** The only block style Nook gives: normal text (SPEC-PLAIN). A heading or a quote already
+ *  in a note can be turned into it; neither can be made, nor a code block. */
+export type BlockTarget = "paragraph";
 export type ListKind = "bullet" | "ordered" | "task";
 
 export type BlockResult = { ok: true; text: string; from: number; to: number } | { ok: false; reason: string };
@@ -27,17 +29,6 @@ export function touchedBlocks(m: Model, from: number, to: number): BlockModel[] 
 function attrEnd(b: BlockModel): number {
   const pb = b.block as { attributes?: { range: { end: number } } } | null;
   return pb && "attributes" in pb && pb.attributes ? pb.attributes.range.end : b.info.range.end;
-}
-
-/** A block's own source without its attribute line (`{color=red}` as its last line): a
- *  paragraph's range holds that line, and it is not one of the paragraph's lines of text. */
-function bodyOf(text: string, b: BlockModel): string {
-  const r = b.info.range;
-  const pb = b.block as { attributes?: { target: string; range: { start: number; end: number } } } | null;
-  // An image's attribute line (its width) is not a paragraph's style: a heading would not keep it.
-  const a = pb && "attributes" in pb && pb.attributes && pb.attributes.target === "paragraph" ? pb.attributes.range : null;
-  if (!a || a.start <= r.start || a.start > r.end) return text.slice(r.start, r.end);
-  return text.slice(r.start, a.start).replace(/(\r\n|\r|\n)[ \t]*$/, "");
 }
 
 /** What the person sees of a block: its characters, breaks as line breaks. */
@@ -144,69 +135,39 @@ function result(old: Model, t: string, touched: BlockModel[], ignore: (keyof Run
   return { ok: true, text: t, from: nc[sel[0]].start, to: nc[sel[sel.length - 1]].end };
 }
 
-/** Block style: normal text, Heading 1 to 4, Quote or Code block (EDITOR-PLAN 3.3). */
+/** A heading or a quote becomes normal text (SPEC-PLAIN 4: Backspace at its start).
+ *  Paragraphs and code blocks are left as they are. */
 export function setBlockStyle(text: string, from: number, to: number, target: BlockTarget): BlockResult {
   const m = buildModel(text);
   const touched = touchedBlocks(m, from, to).filter((b) => b.info.kind !== "rule");
   if (touched.length === 0) return { ok: false, reason: "there is no text here" };
   const p = new Patch();
-  const ignore: (keyof RunStyle)[] = ["size"];
   for (const b of touched) {
     const now = blockStyleOf(b);
     if (now === target) continue;
     const r = b.info.range;
     const src = text.slice(r.start, r.end);
-    if (target === "code" || now === "code") {
-      ignore.push("code", "font");
-      if (target === "code") {
-        if (b.info.kind !== "paragraph" || !b.info.topLevel) return { ok: false, reason: "only a paragraph can become a code block" };
-        if (m.chars.slice(b.va, b.vb).some((c) => c.style.bold || c.style.italic || c.style.strike || c.style.underline || c.style.color || c.style.bg || c.style.font || c.style.link)) {
-          return { ok: false, reason: "a code block cannot keep the text's formatting" };
-        }
-        const shown = m.chars.slice(b.va, b.vb).map((c) => (c.kind === "soft" || c.kind === "hard" ? "\n" : c.ch)).join("");
-        const fence = "`".repeat(Math.max(3, ...(shown.match(/`{3,}/g) ?? []).map((x) => x.length + 1)));
-        p.replace(r.start, Math.max(r.end, attrEnd(b)), `${fence}\n${shown}\n${fence}`);
-      } else {
-        // A code block becomes paragraphs: each line, escaped, is a line of one paragraph.
-        const lines = m.chars.slice(b.va, b.vb).map((c) => c.ch).join("").replace(/\n$/, "").split("\n");
-        p.replace(r.start, r.end, lines.map((l) => escapeText(l)).join("  \n"));
-        if (target !== "paragraph") return { ok: false, reason: "a code block becomes normal text first" };
-      }
-      continue;
-    }
-    if (target === "quote") {
-      if (b.info.path.includes("/quote")) continue;
-      for (const ls of lineStarts(text, r.start, Math.max(r.end, attrEnd(b)))) p.insert(ls, "> ");
-      continue;
-    }
-    // Leaving a quote.
-    if (now === "quote" && target === "paragraph") {
+    // A code block is not turned into text here: it is left by Enter on its empty last line.
+    if (now === "code") continue;
+    if (now === "quote") {
       for (const ls of lineStarts(text, r.start, Math.max(r.end, attrEnd(b)))) {
         const q = /^ {0,3}> ?/.exec(text.slice(ls, ls + 6));
         if (q) p.replace(ls, ls + q[0].length, "");
       }
       continue;
     }
-    // Headings: one line, `#` marks at its start.
+    // A heading: the `#` marks at its start go, and a closing sequence of `#`.
+    if (b.info.kind !== "heading") continue;
     const atx = /^(#{1,6})([ \t]+|$)/.exec(src);
-    const level = target === "paragraph" ? 0 : Number(target.slice(1));
-    if (b.info.kind === "heading") {
-      if (!atx) return { ok: false, reason: "this heading is written with an underline; change it in Raw" };
-      p.replace(r.start, r.start + atx[0].length, level ? "#".repeat(level) + " " : "");
-      // A closing sequence of `#` goes too when the heading becomes text.
-      const close = /[ \t]+#+[ \t]*$/.exec(src);
-      if (!level && close) p.replace(r.end - close[0].length, r.end, "");
-    } else {
-      // The paragraph's attribute line stays under the heading, as its own (the same style).
-      if (/[\r\n]/.test(bodyOf(text, b))) return { ok: false, reason: "a heading is one line; this paragraph has several" };
-      if (!level) continue;
-      p.insert(r.start, "#".repeat(level) + " ");
-    }
+    if (!atx) return { ok: false, reason: "this heading is written with an underline; change it in Raw" };
+    p.replace(r.start, r.start + atx[0].length, "");
+    const close = /[ \t]+#+[ \t]*$/.exec(src);
+    if (close) p.replace(r.end - close[0].length, r.end, "");
   }
   if (p.empty) return { ok: true, text, from, to };
   const t = p.apply(text);
   if (t === null) return { ok: false, reason: "the change could not be made safely" };
-  return result(m, t, touched, ignore, from, to);
+  return result(m, t, touched, ["size"], from, to);
 }
 
 const MARKER: Record<ListKind, (n: number) => string> = {

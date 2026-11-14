@@ -4,11 +4,11 @@
 // own: the edit stays in its region (region.ts).
 
 import { applyStyle, stepSize, type Change, type Result as StyleResult } from "./style/apply.ts";
-import { blockStyleAt, insertBlock, listKindAt, seen, setBlockStyle, toggleList, touchedBlocks, type BlockResult, type BlockTarget } from "./style/blocks.ts";
+import { blockStyleAt, insertBlock, listKindAt, seen, toggleList, touchedBlocks, type BlockResult } from "./style/blocks.ts";
 import { cellChars, cellMarkdown, shownLength, styleCellText } from "./style/cells.ts";
 import { buildModel, type Model } from "./style/model.ts";
 import { addColumn, addRow, parseTable, removeColumn, removeRow, replaceTable, type Grid } from "./style/tables.ts";
-import { deleteAt, deleteRange, enter, insertBlocks, leaveCode, lineBreak, lineShortcut, pasteMarkdown, pastePlain, typeText, type Edit } from "./style/typing.ts";
+import { deleteAt, deleteRange, enter, insertBlocks, lineBreak, lineShortcut, pasteMarkdown, pastePlain, typeText, type Edit } from "./style/typing.ts";
 import { setImageWidth, toggleTask } from "./style/widgets.ts";
 import { writeSetting } from "./fmwriter.ts";
 import { cleanTag, cleanTitle, naturalSize, noteFontOf, noteSizeOf } from "./meta.ts";
@@ -16,7 +16,7 @@ import { diff, editWithin, finalTable, frontMatterRegion, inside, regionOf, tabl
 import { isBlank } from "./style/blank.ts";
 import type { Doc, Intent, ListKind, Mode, PendingCell, Result, SavedStyle, Sel, Skipped, TableOp, TextEdit, Typing } from "./types.ts";
 
-const NO_TYPING: Typing = { marks: [], block: null };
+const NO_TYPING: Typing = { marks: [] };
 
 export const REFUSE_SELECT = "Select some text first";
 
@@ -128,9 +128,6 @@ export function caretChar(m: Model, p: number) {
 export function shownSize(m: Model, p: number, typing: Typing): number {
   for (let i = typing.marks.length - 1; i >= 0; i--) {
     const c = typing.marks[i];
-    // A size that is only the block's own, with a heading waiting on an empty line: the heading's.
-    const h = c.kind === "size" && c.own ? /^h([1-6])$/.exec(typing.block ?? "") : null;
-    if (h) return Math.round(naturalSize(m, { kind: "heading", level: Number(h[1]) }) * 10) / 10;
     if (c.kind === "size") return c.pt;
   }
   const c = caretChar(m, p);
@@ -181,12 +178,6 @@ function nextLine(text: string, line: { to: number }): string | null {
   if (line.to >= text.length) return null;
   return lineAt(text, line.to + 1).text;
 }
-
-/** The text to put on an empty line so that what is typed there is a block of this kind. */
-const START: Record<BlockTarget, [string, string]> = {
-  paragraph: ["", ""], h1: ["# ", ""], h2: ["## ", ""], h3: ["### ", ""], h4: ["#### ", ""], h5: ["##### ", ""], h6: ["###### ", ""],
-  quote: ["> ", ""], code: ["```\n", "\n```"],
-};
 
 const LOOK = ["color", "bg", "font", "size", "underline"] as const;
 const sameLook = (k: (typeof LOOK)[number], a: Model["chars"][number]["style"], b: Model["chars"][number]["style"]) => (k === "size" ? Math.abs(a.size - b.size) < 0.01 : a[k] === b[k]);
@@ -299,7 +290,7 @@ function lookOnBlock(text: string, at: number, marks: Change[]): { text: string;
   return { text: cur, at: p, reasons: [...new Set(reasons)] };
 }
 
-/** `setBlock` and `setList` with a look waiting at a caret: the block's text takes it. Nothing
+/** `setList` with a look waiting at a caret: the block's text takes it. Nothing
  *  is left waiting then: what is typed next takes the look of the text before it, which now
  *  has it. With no text to take it (an empty item), it goes on waiting. A waiting size that is
  *  only a block's own is the new block's. */
@@ -307,64 +298,11 @@ function withWaitingLook(out: Out, marks: Change[]): Out {
   const size = lineSize(buildModel(out.text), out.sel.head, out.sel.head);
   const now = marks.map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: size, own: true } : c));
   const look = lookOnBlock(out.text, out.sel.head, now);
-  if (!look) return { ...out, typing: { marks: now, block: null } };
+  if (!look) return { ...out, typing: { marks: now } };
   const skipped = [...(out.skipped?.reasons ?? []), ...look.reasons];
   // What a line does not take (inline code is for a stretch of text, not a look) goes on waiting.
   const still = now.filter((c) => c.kind === "code" || c.kind === "link" || c.kind === "size-step");
-  return { ...out, text: look.text, sel: caret(look.at), typing: { marks: still, block: null }, ...(skipped.length ? { skipped: { count: skipped.length, reasons: skipped } } : {}) };
-}
-
-/** Version 1's `change()`: whatever the block had goes first, then the new style. */
-function changeBlock(t: string, f: number, to: number, kind: BlockTarget): BlockResult {
-  if (blockStyleAt(t, f, to) === kind) return { ok: true, text: t, from: f, to };
-  let r = setBlockStyle(t, f, to, "paragraph");
-  for (let i = 0; i < 3 && r.ok && blockStyleAt(r.text, r.from, r.to) !== "paragraph"; i++) {
-    const next = setBlockStyle(r.text, r.from, r.to, "paragraph");
-    if (!next.ok || next.text === r.text) break;
-    r = next;
-  }
-  if (!r.ok || kind === "paragraph") return r;
-  return kind === "quote" ? keepingStyle(r.text, r.from, r.to, (x, a, z) => setBlockStyle(x, a, z, kind)) : setBlockStyle(r.text, r.from, r.to, kind);
-}
-
-function writeStart(text: string, p: number, kind: BlockTarget): Out {
-  const line = lineAt(text, p);
-  const [a, z] = START[kind];
-  const at = line.from + a.length;
-  return { text: text.slice(0, line.from) + a + z + text.slice(line.to), sel: caret(at) };
-}
-
-function setBlock(doc: Doc, kind: BlockTarget, mode: Mode): Step {
-  const { text, sel } = doc;
-  const from = Math.min(sel.anchor, sel.head);
-  const to = Math.max(sel.anchor, sel.head);
-  const empty = from === to;
-  const line = lineAt(text, sel.head);
-  // On an empty line there is nothing to change: the style is for what is typed next.
-  if (empty && isBlank(line.text) && blockStyleAt(text, from, to) === null) {
-    if (mode === "rich") return { text, sel, typing: { marks: doc.typing.marks, block: kind === "paragraph" ? null : kind } };
-    return writeStart(text, sel.head, kind);
-  }
-  // Out of a code block: its text becomes the new style when it can; when it cannot, or the
-  // caret is on its empty last line, the caret moves to a new line under the block (`leaveCode`)
-  // and the style is for what is typed there.
-  if (empty && blockStyleAt(text, from, to) === "code" && kind !== "code") {
-    const r = isBlank(line.text) ? null : setBlockStyle(text, from, to, "paragraph");
-    if (!r || !r.ok) {
-      const out = leaveCode(text, sel.head);
-      if (!out) return { reason: "the code block could not be left here; edit it in Raw" };
-      if (mode === "raw" && kind !== "paragraph") {
-        const w = writeStart(out.text, out.cursor, kind);
-        return w;
-      }
-      return { text: out.text, sel: caret(out.cursor), typing: { marks: [], block: kind === "paragraph" ? null : kind } };
-    }
-  }
-  const out = fromRange(changeBlock(text, from, to, kind), sel.anchor > sel.head);
-  // A look waiting at the caret is the line's too, in whichever block the line now is, and goes
-  // on waiting for what is typed next; code takes no style, so nothing is left waiting there.
-  if (empty && isOut(out) && doc.typing.marks.length && kind !== "code") return withWaitingLook(out, doc.typing.marks);
-  return out;
+  return { ...out, text: look.text, sel: caret(look.at), typing: { marks: still }, ...(skipped.length ? { skipped: { count: skipped.length, reasons: skipped } } : {}) };
 }
 
 const ITEM = /^(\s*)(- \[[ xX]\] |[-*+] |\d+[.)] )/;
@@ -420,10 +358,10 @@ function setList(doc: Doc, kind: ListKind): Step {
   const to = Math.max(doc.sel.anchor, doc.sel.head);
   const now = listAt(doc.text, from, to);
   // Intents set a value; `toggleList` toggles (7.3).
-  // (The list it already is: only a look waiting at the caret changes anything, as `setBlock`.)
+  // (The list it already is: only a look waiting at the caret changes anything.)
   if (kind === now) return from === to && doc.typing.marks.length ? withWaitingLook({ text: doc.text, sel: doc.sel }, doc.typing.marks) : { text: doc.text, sel: doc.sel };
   const out = listOn(doc.text, doc.sel, kind === "none" ? (now as Exclude<ListKind, "none">) : kind);
-  // A look waiting at the caret is the item's too, and goes on waiting (as `setBlock`).
+  // A look waiting at the caret is the item's too.
   if (from === to && isOut(out) && doc.typing.marks.length) return withWaitingLook(out, doc.typing.marks);
   return out;
 }
@@ -442,7 +380,7 @@ function setMark(doc: Doc, change: Change, mode: Mode, m: Model): Step {
     if (mode === "raw" || change.kind === "link") return { reason: REFUSE_SELECT };
     // 7.6: with no selection, `−` and `+` set the shown size plus or minus 1.
     const c: Change = change.kind === "size-step" ? { kind: "size", pt: stepSize(shownSize(m, doc.sel.head, doc.typing), change.dir) } : change;
-    return { text: doc.text, sel: doc.sel, typing: { marks: addMark(doc.typing.marks, c), block: doc.typing.block } };
+    return { text: doc.text, sel: doc.sel, typing: { marks: addMark(doc.typing.marks, c) } };
   }
   // Bold, italic, underline or strike that every selected character already has (or, off, none
   // has) changes nothing: the routine would write the same look in other markup, so a setting
@@ -468,7 +406,7 @@ function useStyle(doc: Doc, style: SavedStyle | "reset", mode: Mode, m: Model): 
   const changes = changesOf(s, noteSizeOf(m)).map((c): Change => (s.size === null && c.kind === "size" ? { kind: "size", pt: lineSize(m, from, to), own: true } : c));
   if (from === to) {
     if (mode === "raw") return { reason: REFUSE_SELECT };
-    return { text: doc.text, sel: doc.sel, typing: { marks: changes, block: doc.typing.block } };
+    return { text: doc.text, sel: doc.sel, typing: { marks: changes } };
   }
   // On a selection: one property after another, as one change to the note.
   let cur: { text: string; from: number; to: number } = { text: doc.text, from, to };
@@ -498,8 +436,6 @@ function setLink(doc: Doc, href: string | null): Step {
 
 // --- typing (7.4.3, 7.4.4, 7.6) ---------------------------------------------------------------
 
-const BLOCK_NAME: Record<BlockTarget, string> = { paragraph: "Normal text", h1: "Heading 1", h2: "Heading 2", h3: "Heading 3", h4: "Heading 4", h5: "Heading 5", h6: "Heading 6", quote: "Quote", code: "Code block" };
-
 function insertText(doc: Doc, ins: string): Step {
   const from = Math.min(doc.sel.anchor, doc.sel.head);
   const to = Math.max(doc.sel.anchor, doc.sel.head);
@@ -511,27 +447,14 @@ function insertText(doc: Doc, ins: string): Step {
     const kept = typeText(doc.text, from, to, ins.replace(/\t/g, "    ").replace(/ /g, "\u00a0"), waiting);
     if (kept.ok) r = kept;
   }
-  // A block style chosen on an empty line: the first thing typed there starts that block.
-  const kind = doc.typing.block;
-  let refused = "";
-  if (r.ok && kind && kind !== "paragraph" && !isBlank(ins)) {
-    const at = r.cursor;
-    const b = kind === "quote" ? keepingStyle(r.text, at, at, (x, a, z) => setBlockStyle(x, a, z, kind)) : setBlockStyle(r.text, at, at, kind);
-    // In a new code block the caret belongs after the text, not on the closing fence's line.
-    const onFence = b.ok && kind === "code" && b.text[b.from - 1] === "\n" && b.text[b.from] === "`";
-    if (b.ok) r = { ok: true, text: b.text, cursor: onFence ? b.from - 1 : b.from };
-    // The text is typed all the same; the person is told why it is not the block they chose.
-    else refused = `${BLOCK_NAME[kind]} was not applied${waiting.length ? " with this style" : ""}: ${b.reason}`;
-  }
   const step = fromEdit(r);
   if (!isOut(step)) return step;
-  if (refused) step.skipped = { count: 1, reasons: [refused] };
   // A space typed alone leaves `typing` waiting for the next letter. (A no-break space is text:
   // SPEC-NOTES, "The kept space".)
   const alone = /^[ \t]+$/.test(ins);
-  step.typing = alone ? { marks: waiting, block: kind } : NO_TYPING;
-  // 7.6: after a space or a backtick, a line that is now a shortcut becomes its block, as `then`.
-  if (/^[ `]$/.test(ins)) {
+  step.typing = alone ? { marks: waiting } : NO_TYPING;
+  // 7.6: after a space, a line that is now a list's shortcut becomes that list, as `then`.
+  if (ins === " ") {
     const sc = lineShortcut(step.text, step.sel.head);
     if (sc && sc.ok) step.then = { type: "shortcut" };
   }
@@ -775,7 +698,7 @@ function visibleKept(old: Model, next: Model): boolean {
 
 /** The intents of the toolbar and the widgets, which never write into the front matter: only
  *  `setMeta` does (4.2). In Raw mode the caret can stand in it. */
-const NOT_IN_FRONT_MATTER = new Set<Intent["type"]>(["setMark", "applyStyle", "setBlock", "setList", "setLink", "insertBlock", "insertPhoto", "shortcut", "setImageWidth", "toggleTask", "tableEdit"]);
+const NOT_IN_FRONT_MATTER = new Set<Intent["type"]>(["setMark", "applyStyle", "setList", "setLink", "insertBlock", "insertPhoto", "shortcut", "setImageWidth", "toggleTask", "tableEdit"]);
 export const REFUSE_FRONT_MATTER = "this is the note's front matter: its settings are changed in the header, or edited as text";
 
 function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
@@ -813,7 +736,7 @@ function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
         // heading's in the second half of a heading.
         const now = lineSize(buildModel(s.text), s.sel.head, s.sel.head);
         const marks = (s.text !== doc.text ? carry : doc.typing.marks).map((c): Change => (c.kind === "size" && c.own ? { kind: "size", pt: now, own: true } : c));
-        s.typing = { marks, block: null };
+        s.typing = { marks };
       }
       return s;
     }
@@ -836,15 +759,13 @@ function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
     case "shortcut": {
       const sc = lineShortcut(doc.text, doc.sel.head);
       if (!sc) return { reason: "there is no shortcut here" };
-      // The marks typed with a look (`> ` in a saved style) become the block; the look they had
-      // goes on waiting for the text typed in it.
+      // The marks typed with a look (`- ` in a saved style) become the list item; the look they
+      // had goes on waiting for the text typed in it.
       const look = styleToCarry(m, doc.sel, NO_TYPING);
       const made = fromEdit(sc);
-      if (isOut(made) && look.length) made.typing = { marks: look, block: null };
+      if (isOut(made) && look.length) made.typing = { marks: look };
       return made;
     }
-    case "setBlock":
-      return setBlock(doc, intent.kind, mode);
     case "setList":
       return setList(doc, intent.kind);
     case "setLink":
@@ -906,6 +827,9 @@ function step(doc: Doc, intent: Intent, mode: Mode, m: Model): Step {
       const at = (p: number) => (p >= oldEnd ? p + shift : Math.min(mapPos(p, e, -1), r.text.length));
       return { text: r.text, sel: { anchor: at(doc.sel.anchor), head: at(doc.sel.head) } };
     }
+    default:
+      // An intent this core does not have (one that was removed, sent by an older page).
+      return { reason: "this cannot be done in this version of the editor" };
   }
 }
 

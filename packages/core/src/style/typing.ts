@@ -889,8 +889,9 @@ export function lineBreak(text: string, from: number, to: number): Edit {
 // --- line-start shortcuts -------------------------------------------------------------------
 
 /**
- * After a character is typed at `p`: if the paragraph's text so far is `# ` to `#### `, `- `,
- * `* `, `1. `, `[] `, `> ` or three backticks, the shortcut's block (EDITOR-PLAN 3.2).
+ * After a character is typed at `p`: if the paragraph's text so far is `- `, `* `, `1. ` or
+ * `[] `, the shortcut's list (EDITOR-PLAN 3.2). `# `, `> ` and three backticks are text: Nook
+ * makes no heading, quote or code block (SPEC-PLAIN).
  */
 export function lineShortcut(text: string, p: number): Edit | null {
   const m = buildModel(text);
@@ -899,30 +900,18 @@ export function lineShortcut(text: string, p: number): Edit | null {
   const k = indexAt(m, p, b);
   const tail = k === b.vb ? /[ \t]*$/.exec(text.slice(m.chars[k - 1].end, p))![0] : "";
   const typed = m.chars.slice(b.va, k).map((c) => c.ch).join("") + tail;
-  const whole = m.chars.slice(b.va, b.vb).map((c) => c.ch).join("");
-  const rest = (n: number) => {
-    const r = deleteVisible(text, b.va, b.va + n);
-    return r;
-  };
-  if (typed === "```" && whole === "```") {
-    const [a, z] = region(text, b);
-    const t = text.slice(0, a) + "```\n\n```" + text.slice(z);
-    return { ok: true, text: t, cursor: a + 4 };
-  }
-  const head = /^(#{1,4}) $/.exec(typed);
   const list: Record<string, ListKind> = { "- ": "bullet", "* ": "bullet", "1. ": "ordered", "[] ": "task" };
-  if (!head && !list[typed] && typed !== "> ") return null;
+  if (!list[typed]) return null;
   if (k === b.vb || (tail && k === b.vb)) {
-    // Nothing after the shortcut yet: write the empty block's markup.
+    // Nothing after the shortcut yet: write the empty item's markup.
     const [a, z] = region(text, b);
-    const markup = head ? head[1] + " " : typed === "> " ? "> " : list[typed] === "task" ? "- [ ] " : list[typed] === "ordered" ? "1. " : "- ";
+    const markup = list[typed] === "task" ? "- [ ] " : list[typed] === "ordered" ? "1. " : "- ";
     const t = text.slice(0, a) + markup + text.slice(z);
     return { ok: true, text: t, cursor: a + markup.length };
   }
-  const r = rest(typed.length);
+  const r = deleteVisible(text, b.va, b.va + typed.length);
   if (!r.ok) return null;
-  const at = r.cursor;
-  const out = head ? setBlockStyle(r.text, at, at, `h${head[1].length}` as "h1") : typed === "> " ? setBlockStyle(r.text, at, at, "quote") : toggleList(r.text, at, at, list[typed]);
+  const out = toggleList(r.text, r.cursor, r.cursor, list[typed]);
   if (!out.ok) return null;
   return { ok: true, text: out.text, cursor: out.from };
 }
@@ -1006,6 +995,9 @@ export function pasteMarkdown(text: string, from: number, to: number, md: string
     from = to = d.cursor;
   }
   const fm = buildModel(md);
+  // Markdown that holds a heading, a quote or a code block is pasted as plain lines: Nook makes
+  // none of the three (SPEC-PLAIN 5.1).
+  if (fm.blocks.some((x) => x.info.kind === "heading" || x.info.kind === "code" || x.info.path.includes("/quote"))) return pastePlain(text, from, to, plain);
   const m = buildModel(text);
   const b = blockAt(m, from);
   const inline = fm.blocks.length === 1 && fm.blocks[0].info.kind === "paragraph" && fm.blocks[0].info.path === "";

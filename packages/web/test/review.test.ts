@@ -38,12 +38,12 @@ test("26 (not a fault, kept as a guard): a style chosen with nothing selected be
     assert.match(s.doc.toString(), /b/);
     assert.equal(undone(s), "x a", `${JSON.stringify(i)}: undo takes back only what was typed after it`);
   }
-  // A block chosen on an empty line, then typing: the typing is one step.
+  // A list chosen on an empty line, then typing: the typing is one step.
   let s = make("x\n\n");
-  s = apply(s, { type: "setBlock", kind: "h2" });
+  s = apply(s, { type: "setList", kind: "bullet" });
   s = apply(s, { type: "insertText", text: "a" });
-  assert.equal(s.doc.toString(), "x\n\n## a");
-  assert.equal(undone(s), "x\n\n");
+  assert.equal(s.doc.toString(), "x\n\n- a");
+  assert.equal(undone(s), "x\n\n- ");
 });
 
 // --- 35a: font search answers that arrive late ---

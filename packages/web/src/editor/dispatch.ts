@@ -88,7 +88,7 @@ export function intentSpecs(state: EditorState, intent: Intent, o: { sel?: Sel; 
 }
 
 /**
- * After a change of block or list at a caret, the browser's own caret is put where the
+ * After a change of list at a caret, the browser's own caret is put where the
  * editor's is. A mouse click can leave the browser's caret on the line's element rather than in
  * its text; when the line is then drawn again (a waiting size gone, markup added), the editor
  * reads that stale place back as the start of the line, and what is typed next goes there.
@@ -113,7 +113,7 @@ export function dispatchIntent(view: EditorView, intent: Intent, o: { sel?: Sel;
     return false;
   }
   view.dispatch(r.specs[0]);
-  if (intent.type === "setBlock" || intent.type === "setList") placeCaret(view);
+  if (intent.type === "setList") placeCaret(view);
   if (r.skipped) hooks.message(r.skipped, "info");
   // `then` is applied as its own undo step, against the text now on screen.
   if (r.specs.length > 1) {
@@ -379,7 +379,7 @@ export function richInput(o: RichInputOptions): Extension[] {
       blur(e, view) {
         if (o.keepsTyping(e.relatedTarget as Element | null)) return false;
         const v = view.state.field(editorField);
-        if (v.typing.marks.length || v.typing.block) setTimeout(() => view.dispatch({ effects: setTyping.of({ marks: [], block: null }) }), 0);
+        if (v.typing.marks.length) setTimeout(() => view.dispatch({ effects: setTyping.of({ marks: [] }) }), 0);
         return false;
       },
     }),

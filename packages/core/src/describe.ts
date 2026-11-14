@@ -3,15 +3,14 @@
 // of a table cell (version 1's `styleCell` in richtable.ts).
 
 import type { VisibleChar } from "../../../noteformat/src/index.ts";
-import { blockStyleAt } from "./style/blocks.ts";
 import { cellChars } from "./style/cells.ts";
 import type { Model } from "./style/model.ts";
 import { noteSizeOf } from "./meta.ts";
 import { caretChar, listAt, shownSize } from "./reduce.ts";
-import type { BlockKind, Doc, ToolbarState, Tri, Val } from "./types.ts";
+import type { Doc, ToolbarState, Tri, Val } from "./types.ts";
 
 /** The command ids of the toolbar (9.4, section 11). */
-export const COMMANDS = ["font", "size", "size-down", "size-up", "bold", "italic", "underline", "strike", "code", "color", "bg", "link", "block", "list", "insert", "styles"] as const;
+export const COMMANDS = ["font", "size", "size-down", "size-up", "bold", "italic", "underline", "strike", "code", "color", "bg", "link", "list", "insert", "styles"] as const;
 export type CommandId = (typeof COMMANDS)[number];
 
 type Ch = Pick<VisibleChar, "style" | "block">;
@@ -29,7 +28,7 @@ function val<T>(chars: Ch[], f: (c: Ch) => T | null): Val<T> {
   return { mixed: false, value: [...set][0] as T | null };
 }
 
-function state(chars: Ch[], codeBlock: (c: Ch) => boolean): Omit<ToolbarState, "block" | "list" | "caret" | "can"> {
+function state(chars: Ch[], codeBlock: (c: Ch) => boolean): Omit<ToolbarState, "list" | "caret" | "can"> {
   return {
     bold: tri(chars, (c) => c.style.bold),
     italic: tri(chars, (c) => c.style.italic),
@@ -53,7 +52,6 @@ function can(st: { inCode: boolean; caret: boolean; link: string | null }, cell 
   const out: Record<string, boolean> = {};
   for (const id of COMMANDS) out[id] = inline;
   out.link = inline && (!st.caret || st.link !== null);
-  out.block = !cell;
   out.list = !cell;
   out.insert = !cell;
   out.styles = inline;
@@ -93,7 +91,7 @@ export function describe(doc: Doc, model: Model): ToolbarState {
           st[c.kind] = { mixed: false, value: c.value };
           break;
         case "size":
-          // The waiting size as `−` and `+` read it: a heading waiting with a style that names no size shows the heading's.
+          // The waiting size as `−` and `+` read it.
           st.size = { mixed: false, value: shownSize(m, doc.sel.head, doc.typing) };
           break;
         case "clear":
@@ -105,10 +103,8 @@ export function describe(doc: Doc, model: Model): ToolbarState {
       }
     }
   }
-  const bk = blockStyleAt(m.text, from, to) as BlockKind | null;
-  const block: BlockKind | null = doc.typing.block ?? bk ?? (isCaret ? "paragraph" : null);
   const list = listAt(m.text, from, to);
-  return { ...st, block, list, caret: isCaret, can: can({ inCode: st.inCode, caret: isCaret, link: st.link }) };
+  return { ...st, list, caret: isCaret, can: can({ inCode: st.inCode, caret: isCaret, link: st.link }) };
 }
 
 /** The toolbar's state while a table cell has the focus: `from` and `to` count the cell's
@@ -125,5 +121,5 @@ export function describeCell(cellSource: string, from: number, to: number): Tool
   const st = state(chars, () => false);
   if (chars.length === 0) st.size = { mixed: false, value: null };
   const caret = from === to;
-  return { ...st, block: null, list: "none", caret, can: can({ inCode: false, caret: false, link: st.link }, true) };
+  return { ...st, list: "none", caret, can: can({ inCode: false, caret: false, link: st.link }, true) };
 }

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import fc from "fast-check";
 import { buildModel, load, reduce, serialize, tablesOf, type Change, type Doc, type Intent, type Mode, type SavedStyle } from "../src/index.ts";
 import { rng } from "./gen.ts";
+import { touchedBlocks } from "../src/style/blocks.ts";
 import { genWidgetNote } from "./gen-widgets.ts";
 
 const NOTE = fc.integer({ min: 1, max: 2 ** 31 - 1 }).map((seed) => genWidgetNote(rng(seed)));
@@ -30,11 +31,10 @@ const INTENT: fc.Arbitrary<Intent> = fc.oneof(
   { weight: 4, arbitrary: fc.record({ type: fc.constant("insertText" as const), text: fc.constantFrom("a", "x y", " ", "*", "#", "`", "[", "_", "é", "日", "1.", "- ") }) },
   { weight: 3, arbitrary: fc.constantFrom<Intent>({ type: "deleteBackward" }, { type: "deleteForward" }, { type: "deleteWordBackward" }, { type: "deleteWordForward" }, { type: "cut" }) },
   { weight: 2, arbitrary: fc.constantFrom<Intent>({ type: "enter" }, { type: "lineBreak" }) },
-  { weight: 1, arbitrary: fc.record({ type: fc.constant("paste" as const), plain: fc.constantFrom("one\ntwo", "*x*", "plain") }) },
+  { weight: 1, arbitrary: fc.record({ type: fc.constant("paste" as const), plain: fc.constantFrom("one\ntwo", "*x*", "plain", "# head", "> quoted", "```\ncode\n```", "Title\n===") }) },
   { weight: 4, arbitrary: fc.record({ type: fc.constant("setMark" as const), change: CHANGE }) },
   { weight: 2, arbitrary: fc.record({ type: fc.constant("applyStyle" as const), style: fc.constantFrom<SavedStyle | "reset">(STYLE, "reset") }) },
   { weight: 1, arbitrary: fc.constant<Intent>({ type: "shortcut" }) },
-  { weight: 2, arbitrary: fc.record({ type: fc.constant("setBlock" as const), kind: fc.constantFrom("paragraph" as const, "h1" as const, "h3" as const, "h6" as const, "quote" as const, "code" as const) }) },
   { weight: 2, arbitrary: fc.record({ type: fc.constant("setList" as const), kind: fc.constantFrom("none" as const, "bullet" as const, "ordered" as const, "task" as const) }) },
   { weight: 1, arbitrary: fc.record({ type: fc.constant("setLink" as const), href: fc.constantFrom("https://example.org", null) }) },
   { weight: 1, arbitrary: fc.record({ type: fc.constant("insertBlock" as const), what: fc.constantFrom("table" as const, "rule" as const) }) },
@@ -69,7 +69,7 @@ const CASE = fc.record({ text: NOTE, a: fc.double({ min: 0, max: 1, noNaN: true 
 function docOf(c: { text: string; a: number; b: number; collapsed: boolean }): Doc {
   const x = Math.floor(c.a * (c.text.length + 1));
   const y = c.collapsed ? x : Math.floor(c.b * (c.text.length + 1));
-  return { text: c.text, sel: { anchor: x, head: y }, typing: { marks: [], block: null } };
+  return { text: c.text, sel: { anchor: x, head: y }, typing: { marks: [] } };
 }
 
 /** A widget or table intent aimed at one of the note's tasks, photos or tables. */
@@ -155,8 +155,10 @@ function aimedDoc(intent: Intent, doc: Doc, w: number, mode: Mode): Doc {
     return { ...doc, sel: { anchor: m.chars[i].start, head: m.chars[j].end } };
   }
   if (intent.type === "shortcut" && mode === "rich") {
-    const marker = ["# ", "### ", "- ", "* ", "1. ", "[] ", "> ", "```"][Math.floor(w * 8)];
-    let d: Doc = { text: doc.text.replace(/\n*$/, "\n\n"), sel: { anchor: 0, head: 0 }, typing: { marks: [], block: null } };
+    // The lists' shortcuts, and the marks that are no shortcut any more (SPEC-PLAIN): text. (The
+    // generator's numbers lean to 0, so a list comes first.)
+    const marker = ["- ", "# ", "1. ", "[] ", "* ", "### ", "> ", "```"][Math.floor(w * 8)];
+    let d: Doc = { text: doc.text.replace(/\n*$/, "\n\n"), sel: { anchor: 0, head: 0 }, typing: { marks: [] } };
     d.sel = { anchor: d.text.length, head: d.text.length };
     for (const ch of marker) {
       const r = reduce(d, { type: "insertText", text: ch }, "rich");
@@ -168,13 +170,14 @@ function aimedDoc(intent: Intent, doc: Doc, w: number, mode: Mode): Doc {
   return doc;
 }
 
-const SETTING = (i: Intent) => (i.type === "setMark" && i.change.kind !== "size-step") || i.type === "setBlock" || i.type === "setList" || i.type === "setLink" || i.type === "setMeta";
+const SETTING = (i: Intent) => (i.type === "setMark" && i.change.kind !== "size-step") || i.type === "setList" || i.type === "setLink" || i.type === "setMeta";
 
 test("properties: parses, edit in its region, edit gives the new text, settings are idempotent", () => {
   let refused = 0;
   let outside = 0;
   const done = new Map<string, number>();
   let notIdempotent: string[] = [];
+  const made: string[] = [];
   const RUNS = 4000;
   fc.assert(
     fc.property(CASE, (c) => {
@@ -201,6 +204,20 @@ test("properties: parses, edit in its region, edit gives the new text, settings 
         assert.equal(r.doc.text.slice(0, lo), doc.text.slice(0, lo), label);
         assert.equal(r.doc.text.slice(r.doc.text.length - (doc.text.length - hi)), doc.text.slice(hi), label);
       } else assert.equal(r.doc.text, doc.text, label);
+      // SPEC-PLAIN 5.1: nothing typed or pasted in Rich makes a heading, a quote or a code block.
+      if (c.mode === "rich" && (intent.type === "insertText" || intent.type === "paste" || intent.type === "shortcut" || intent.type === "enter" || intent.type === "lineBreak")) {
+        const three = (t: string) => {
+          const bs = buildModel(t).blocks;
+          return [bs.filter((b) => b.info.kind === "heading").length, bs.filter((b) => b.info.kind === "code").length, bs.some((b) => b.info.path.includes("/quote")) ? 1 : 0];
+        };
+        const [h0, c0, q0] = three(doc.text);
+        const [h1, c1, q1] = three(r.doc.text);
+        // (Inside one that an older note has, the old rules hold: Enter splits a heading in two.)
+        const lo = Math.min(doc.sel.anchor, doc.sel.head);
+        const hi = Math.max(doc.sel.anchor, doc.sel.head);
+        const inOne = touchedBlocks(buildModel(doc.text), lo, hi).some((b) => b.info.kind === "heading" || b.info.kind === "code" || b.info.path.includes("/quote"));
+        if (!inOne && (h1 > h0 || c1 > c0 || q1 > q0)) made.push(label);
+      }
       // Both ends of the selection lie in the new text.
       for (const end of [r.doc.sel.anchor, r.doc.sel.head]) assert.ok(Number.isInteger(end) && end >= 0 && end <= r.doc.text.length, `selection ${JSON.stringify(r.doc.sel)}: ${label}`);
       // A setting applied twice is the same as once (from the same selection's new place).
@@ -217,9 +234,10 @@ test("properties: parses, edit in its region, edit gives the new text, settings 
   console.log(`properties: ${total} done, ${refused} refused (${outside} by the region rule), ${notIdempotent.length} settings not idempotent; ${JSON.stringify(Object.fromEntries(done))}`);
   assert.equal(outside, 0, "the region rule refused a routine's own result");
   assert.deepEqual(notIdempotent.slice(0, 5), []);
+  assert.deepEqual(made.slice(0, 5), [], "typing or pasting in Rich made a heading, a quote or a code block");
   // The property says something only about intents that were done: most of them, and every kind.
   assert.ok(total >= RUNS / 2, `only ${total} of ${RUNS} intents were done`);
-  for (const type of ["insertText", "deleteBackward", "enter", "paste", "setMark", "applyStyle", "shortcut", "setBlock", "setList", "setLink", "insertBlock", "insertPhoto", "setMeta", "toggleTask", "setImageWidth", "tableEdit"]) {
+  for (const type of ["insertText", "deleteBackward", "enter", "paste", "setMark", "applyStyle", "shortcut", "setList", "setLink", "insertBlock", "insertPhoto", "setMeta", "toggleTask", "setImageWidth", "tableEdit"]) {
     assert.ok((done.get(type) ?? 0) >= 5, `${type} was done ${done.get(type) ?? 0} times`);
   }
   notIdempotent = [];

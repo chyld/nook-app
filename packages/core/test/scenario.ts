@@ -5,7 +5,7 @@ import { reduce, type Doc, type Intent, type Mode, type Typing } from "../src/in
 
 export const CARET = "¦";
 
-export function parse(marked: string, typing: Typing = { marks: [], block: null }): Doc {
+export function parse(marked: string, typing: Typing = { marks: [] }): Doc {
   const c = marked.indexOf(CARET);
   if (c >= 0) {
     const text = marked.slice(0, c) + marked.slice(c + 1);

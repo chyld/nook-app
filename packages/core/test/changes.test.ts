@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildModel, copySelection, type Intent, type Mode } from "../src/index.ts";
+import { buildModel, copySelection, type Intent, type Mode, type Typing } from "../src/index.ts";
 import { run } from "./scenario.ts";
 
 const N = "\u00a0";
@@ -72,11 +72,25 @@ test("5: the typing routines keep a kept space: Enter and a line break next to i
 });
 
 test("5, 14: a no-break space typed by the person is content, not a space waiting for a letter", () => {
-  // Typed U+00A0 (Option+Space, a keyboard that has it) on an empty line with a block style
-  // waiting: it is text, so it starts the block.
-  const r = run({ text: "One\n\n", sel: { anchor: 5, head: 5 }, typing: { marks: [], block: "h2" } }, { type: "insertText", text: N });
+  // Typed U+00A0 (Option+Space, a keyboard that has it) with a look waiting: it is text, so it
+  // takes the look and nothing is left waiting.
+  const red: Typing = { marks: [{ kind: "color", value: "red" }] };
+  const r = run({ text: "One", sel: { anchor: 3, head: 3 }, typing: red }, { type: "insertText", text: N });
   assert.ok("out" in r);
-  assert.equal(r.out, `One\n\n## ${N}¦`);
+  assert.equal(r.out, `One[${N}¦]{color=red}`);
+  assert.deepEqual(r.doc.typing, { marks: [] });
+  const line = run({ text: "One\n\n", sel: { anchor: 5, head: 5 }, typing: red }, { type: "insertText", text: N });
+  assert.ok("out" in line);
+  assert.equal(line.out, `One\n\n${N}¦\n{color=red}`);
+  assert.deepEqual(line.doc.typing, { marks: [] });
+  // An ordinary space typed there leaves the look waiting.
+  const sp = run({ text: "One", sel: { anchor: 3, head: 3 }, typing: red }, { type: "insertText", text: " " });
+  assert.ok("out" in sp);
+  assert.equal(sp.out, "One ¦");
+  assert.deepEqual(sp.doc.typing, red);
+  // In an empty heading or list item that is already there, it is the block's text.
+  assert.equal(out("One\n\n## ¦", { type: "insertText", text: N }), `One\n\n## ${N}¦`);
+  assert.equal(out("One\n\n- ¦", { type: "insertText", text: N }), `One\n\n- ${N}¦`);
 });
 
 test("9: blank lines shown after the front matter can be deleted; the one hidden line stays", () => {
@@ -145,16 +159,16 @@ test("28, change 15: a space or tab where Markdown drops it is kept as U+00A0; e
   assert.equal(buildModel(`${N}Two`).chars[0].ch, N);
 });
 
-test("4, 5 (every path of the kind): the Block and List menus take a line holding a kept space as text", () => {
-  // The Block menu on it styles it, rather than waiting for what is typed next.
-  assert.equal(out(`${N}¦`, { type: "setBlock", kind: "h2" }), `## ${N}¦`);
+test("4, 5 (every path of the kind): the List menu takes a line holding a kept space as text", () => {
+  // The List menu on it makes it an item holding the space.
+  assert.equal(out(`${N}¦`, { type: "setList", kind: "bullet" }), `- ${N}¦`);
   // A list started on the empty line under it is a list, not a continuation of its paragraph.
   assert.equal(out(`${N}\n¦`, { type: "setList", kind: "bullet" }), `${N}\n\n- ¦`);
 });
 
 test("found by the property test (with change 8's and 12's intents added): Bold over text that is all bold already changes nothing", () => {
   const text = "**![](note.assets/p.png)**\n\n> [***&amp;* 100%**]{size=14pt font=Caveat} **~~~~++Saudade++~~~~ beta**";
-  const r = run({ text, sel: { anchor: 98, head: 2 }, typing: { marks: [], block: null } }, { type: "setMark", change: { kind: "bold", on: true } });
+  const r = run({ text, sel: { anchor: 98, head: 2 }, typing: { marks: [] } }, { type: "setMark", change: { kind: "bold", on: true } });
   assert.ok("out" in r);
   assert.equal(r.doc.text, text);
   // And off over text that has none of it.

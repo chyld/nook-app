@@ -24,7 +24,7 @@ export const tableAsText = StateEffect.define<number>({ map: (v, ch) => ch.mapPo
 /** The options of the Rich view (photo addresses, widget actions). */
 export const richOptions = Facet.define<RichOptions, RichOptions>({ combine: (v) => v[0] ?? { photoUrl: () => null } });
 
-export const NO_TYPING: Typing = { marks: [], block: null };
+export const NO_TYPING: Typing = { marks: [] };
 
 export interface EditorValue {
   model: Model;

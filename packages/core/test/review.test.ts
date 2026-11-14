@@ -17,16 +17,13 @@ function refused(marked: string, intent: Intent, mode: Mode = "rich"): string {
   return r.refused;
 }
 
-// On a blank line of a code block, the Block menu leaves the block (`leaveCode`); elsewhere it
-// converts the block (7.6).
-test("17: leaving a code block from the Block menu finds its own closing fence", () => {
+// Enter on the empty last line of a code block leaves the block (`leaveCode`, 7.5). This was
+// found from the Block menu, which is gone (SPEC-PLAIN); Enter is the way that is left.
+test("17: leaving a code block finds its own closing fence", () => {
   // A block opened with four backticks holds a line of three: that line is code, not the end.
-  for (const mode of ["rich", "raw"] as const) {
-    const r = run("````\na\n¦\n```\nb\n````", { type: "setBlock", kind: "paragraph" }, mode);
-    assert.ok("out" in r, mode);
-    assert.equal(r.out, "````\na\n\n```\nb\n````\n\n¦", mode);
-  }
-  assert.equal(out("```\ncode\n¦\n```", { type: "setBlock", kind: "paragraph" }), "```\ncode\n```\n\n¦", "the ordinary case");
+  assert.equal(out("````\na\n```\nb\n¦\n````", { type: "enter" }), "````\na\n```\nb\n````\n\n¦");
+  assert.equal(out("````\na\n¦\n```\nb\n````", { type: "enter" }), "````\na\n\n¦\n```\nb\n````", "an empty line before the line of three is not the last line");
+  assert.equal(out("```\ncode\n¦\n```", { type: "enter" }), "```\ncode\n```\n\n¦", "the ordinary case");
 });
 
 test("17: leaving a code block never changes the code's text", () => {
@@ -34,18 +31,24 @@ test("17: leaving a code block never changes the code's text", () => {
     const m = buildModel(t);
     return m.chars.filter((c) => m.blocks[c.block].info.kind === "code").map((c) => c.ch).join("");
   };
-  for (const text of ["~~~~\nx\n~~~\n\n```\n\ny\n~~~~\n\nafter", "````\n\n```\n\n````", "```\na\n\n~~~\n\n```"]) {
+  let left = 0;
+  for (const text of ["~~~~\nx\n~~~\n\n```\n\ny\n~~~~\n\nafter", "````\n\n```\n\n````", "```\na\n\n~~~\n\n```", "~~~~\nx\n~~~\ny\n\n~~~~\n\nafter", "````\na\n```\nb\n\n````", "```\na\n\n```"]) {
     for (let p = 0; p <= text.length; p++) {
       const line = text.slice(text.lastIndexOf("\n", p - 1) + 1, (text.indexOf("\n", p) + 1 || text.length + 1) - 1);
       if (line !== "") continue;
-      for (const mode of ["rich", "raw"] as const) {
-        const r = run(text.slice(0, p) + "¦" + text.slice(p), { type: "setBlock", kind: "h2" }, mode);
-        if (!("out" in r)) continue;
-        if (buildModel(text).blocks.every((b) => b.info.kind !== "code" || p < b.info.range.start || p > b.info.range.end)) continue;
-        assert.equal(code(r.doc.text).replace(/\n+$/, ""), code(text).replace(/\n+$/, ""), `${mode}, caret at ${p} of ${JSON.stringify(text)}: ${JSON.stringify(r.out)}`);
-      }
+      if (buildModel(text).blocks.every((b) => b.info.kind !== "code" || p < b.info.range.start || p > b.info.range.end)) continue;
+      const r = run(text.slice(0, p) + "¦" + text.slice(p), { type: "enter" });
+      if (!("out" in r)) continue;
+      // Enter inside the code adds a line to it; Enter on its empty last line leaves it.
+      const was = code(text).replace(/\n+$/, "");
+      const now = code(r.doc.text).replace(/\n+$/, "");
+      const inside = buildModel(r.doc.text).blocks.some((b) => b.info.kind === "code" && r.doc.sel.head >= b.info.range.start && r.doc.sel.head <= b.info.range.end);
+      if (!inside) left++;
+      assert.equal(now.replace(/\n/g, ""), was.replace(/\n/g, ""), `caret at ${p} of ${JSON.stringify(text)}: ${JSON.stringify(r.out)}`);
+      if (!inside) assert.equal(now, was, `left the block, caret at ${p} of ${JSON.stringify(text)}: ${JSON.stringify(r.out)}`);
     }
   }
+  assert.ok(left >= 3, `the block was left ${left} times`);
 });
 
 test("18: Clear, then Bold, with nothing selected: what is typed is plain bold", () => {
@@ -79,9 +82,9 @@ test("19: a size outside 1 to 400, or with two decimals, is refused with nothing
   assert.ok("out" in run("Hi¦", { type: "setMark", change: { kind: "size", pt: 12.5 } }));
 });
 
-test("20: Raw mode, List or Block on a blank line inside the front matter does not write into it", () => {
+test("20: Raw mode, List on a blank line inside the front matter does not write into it", () => {
   const fm = "---\ntitle: a\n¦\ntags: [x]\n---\n\nbody";
-  for (const i of [{ type: "setList", kind: "bullet" }, { type: "setList", kind: "ordered" }, { type: "setBlock", kind: "h1" }, { type: "setBlock", kind: "code" }, { type: "setBlock", kind: "quote" }] as Intent[]) {
+  for (const i of [{ type: "setList", kind: "bullet" }, { type: "setList", kind: "ordered" }, { type: "setList", kind: "task" }] as Intent[]) {
     assert.match(refused(fm, i, "raw"), /front matter/i, JSON.stringify(i));
   }
   // Typing there is plain text entry, and stays allowed.

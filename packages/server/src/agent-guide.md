@@ -72,7 +72,7 @@ curl -sS -X POST "{{SERVER}}/api/agent/v1/items?title=Shopping&tags=food,home" -
 
 Answer, status 201: `{ "id": "…", "revision": "…", "entry": { … }, "text": "…", "url": "…" }`.
 
-- Without `title`, the note's title is its first heading.
+- Always give the title: in the address, or in the front matter of the note you send.
 - You may instead send a note that already has front matter; then leave `title` and `tags` out
   of the address.
 - Always use `--data-binary`. Plain `-d` removes the line breaks.
@@ -83,6 +83,9 @@ Answer, status 201: `{ "id": "…", "revision": "…", "entry": { … }, "text":
 Everything a person can do to a note with Nook's toolbar, you can write as text. This section
 lists all of it. Plain Markdown is enough for most notes; the rest is for colour, size, fonts,
 underline and highlight.
+
+Nook has no headings, quotes or code blocks: write normal paragraphs, lists and tables. A note
+that already has one keeps it, and nothing you send is refused for containing one.
 
 ### What the editor offers, and how to write it
 
@@ -100,9 +103,6 @@ underline and highlight.
 | Size | `[text]{size=14pt}` |
 | Link | `[text](https://example.com)`; a bare `https://…` address is a link too |
 | Normal text | a paragraph: lines of text, with an empty line between paragraphs |
-| Heading 1 to 6 | `# Heading` to `###### Heading` |
-| Quote | `> text` at the start of each line |
-| Code block | a line of three backticks (or three `~`), the code, and the same line again; a language name may follow the first, as in the example |
 | Bullets | `- item` |
 | Numbers | `1. item` |
 | Tasks | `- [ ] to do` and `- [x] done` |
@@ -124,9 +124,6 @@ size: 17px
 spacing: 1.5
 ---
 
-# Lisbon trip
-{color=indigo}
-
 Leave on [Friday the 14th]{color=red}, and ++book the tram tickets++ before then.
 Pack ==sunscreen== and the [window seat]{bg=mint} confirmation, and ~~the umbrella~~.
 
@@ -135,7 +132,8 @@ Pack ==sunscreen== and the [window seat]{bg=mint} confirmation, and ~~the umbrel
 This paragraph is grey and small, set by the line under it.
 {color=gray size=small}
 
-## To do
+**To do**
+{color=indigo}
 
 - [x] Renew the passport
 - [ ] Buy insurance
@@ -146,35 +144,32 @@ This paragraph is grey and small, set by the line under it.
 2. Reserve the hotel
    - near Alfama
 
-> "Saudade" has no exact translation.
-> It is closer to a feeling than a word.
+*"Saudade" has no exact translation: it is closer to a feeling than a word.*
 
 See [the city guide](https://example.com/lisbon).
 
 ---
 
-## Costs
+[**Costs**]{size=large}
 
 | Item    | Cost (EUR) | Paid               |
 |:--------|-----------:|:------------------:|
 | Flights |        240 | [yes]{color=green} |
 | Hotel   |        510 | ==no==             |
 
-~~~python
-total = sum([240, 510])
-~~~
+The total is `750` euros, about `375` each.
 ```
 
 ### The forms Nook adds
 
 - **A styled span** is `[text]{key=value key=value}`: brackets round the text, then braces. It
-  works anywhere text does: in a paragraph, a list item, a table cell, a quote, a heading, and
-  round other formatting such as `**bold**` or a link.
+  works anywhere text does: in a paragraph, a list item, a table cell, and round other formatting
+  such as `**bold**` or a link.
 - **One span, all its keys.** A span cannot be put inside another span, and two sets of braces
   cannot follow one text: for red text on mint write `[text]{color=red bg=mint}`.
-- **A block line** is a line holding only `{key=value}`, straight under a heading or as the
-  last line of a paragraph, with an empty line after it. It styles the whole heading or
-  paragraph. It does not work under a list, a table or a quote: use spans there.
+- **A block line** is a line holding only `{key=value}`, as the last line of a paragraph,
+  with an empty line after it. It styles the whole paragraph. It does not work under a list
+  or a table: use spans there.
 - **Shorthand:** `++text++` is underline and `==text==` is highlight.
 - **For the whole note,** in the front matter: `font`, `size`, and `spacing` (the gap between
   paragraphs, a number from 0 to 5; 1 is the usual gap).
@@ -207,10 +202,10 @@ The syntax is strict, and a mistake is never reported: it is only shown.
   `[x] `.
 - **Tables.** The first row is the header. The second row sets how each column is lined up:
   `:--` left, `--:` right, `:-:` centred. Each row is one line: a cell cannot hold a line
-  break, a list or a code block. Text in a cell can be bold, a link, or a styled span. Write
+  break or a list. Text in a cell can be bold, a link, or a styled span. Write
   `\|` for a bar inside a cell.
-- **Code.** Nothing is styled inside inline code or a code block: there, every character is
-  shown as typed.
+- **Inline code.** Nothing is styled inside inline code: there, every character is shown as
+  typed.
 - **Links.** `http://`, `https://` and `mailto:` addresses open; a link to anything else is
   shown but does not open.
 - **To show a character that would otherwise be read:** put a backslash before it, as in

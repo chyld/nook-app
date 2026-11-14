@@ -1,5 +1,9 @@
 # Notes app, version 2: specification
 
+**Normal text only.** Since 2026-11-13 Nook makes no heading, quote or code block.
+`SPEC-PLAIN.md` overrides sections 7.5, 7.6 and 9.4 of this document where they describe
+making one; the rest of this document is left as it was written.
+
 Version 2.0, 2026-11-12 (after four rounds of review). This says what the rebuilt app does and how it is put together. Version 2
 is written from scratch in a new folder, `v2/`. Nothing in `app/` is changed. Section 16 lists
 what changed since each earlier draft.

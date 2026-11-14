@@ -1,7 +1,6 @@
 // The shapes of the editing core (SPEC2 7.3).
 
 import type { Change } from "./style/apply.ts";
-import type { BlockTarget } from "./style/blocks.ts";
 import type { CellRun } from "./style/cells.ts";
 import type { Model } from "./style/model.ts";
 import type { SettingKey, SettingValue } from "./fmwriter.ts";
@@ -9,7 +8,6 @@ import type { SettingKey, SettingValue } from "./fmwriter.ts";
 export type { Change, CellRun, Model, SettingKey, SettingValue };
 
 export type Mode = "rich" | "raw";
-export type BlockKind = BlockTarget;
 /** The routines' names, plus "none". */
 export type ListKind = "none" | "bullet" | "ordered" | "task";
 
@@ -21,7 +19,6 @@ export interface Sel {
 export interface Typing {
   /** What the next typed text gets. */
   marks: Change[];
-  block: BlockKind | null;
 }
 
 export interface Doc {
@@ -85,7 +82,6 @@ export type Intent =
   | { type: "setMark"; change: Change }
   | { type: "applyStyle"; style: SavedStyle | "reset" }
   | { type: "shortcut" }
-  | { type: "setBlock"; kind: BlockKind }
   | { type: "setList"; kind: ListKind }
   | { type: "setLink"; href: string | null }
   | { type: "insertBlock"; what: "table" | "rule" }
@@ -115,8 +111,6 @@ export interface ToolbarState {
   font: Val<string>;
   /** In points; for an empty note, the note's size. */
   size: Val<number>;
-  /** null when the selection mixes block styles. */
-  block: BlockKind | null;
   list: ListKind;
   link: string | null;
   inCode: boolean;

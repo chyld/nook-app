@@ -71,23 +71,23 @@ test("pending style: the next characters typed get it (grok 7, EDITOR-PLAN 3.4)"
 });
 
 test("line-start shortcuts, each one step after the typed characters", () => {
-  assert.equal(typeAll("|", "# Title"), "# Title|");
-  assert.equal(typeAll("|", "### Small"), "### Small|");
   assert.equal(typeAll("|", "- item"), "- item|");
   assert.equal(typeAll("|", "1. first"), "1. first|");
   assert.equal(typeAll("|", "[] task"), "- [ ] task|");
-  assert.equal(typeAll("|", "> quoted"), "> quoted|");
-  assert.equal(typeAll("|", "```"), "```\n|\n```");
+  // The marks of a heading, a quote and a code block are not shortcuts (SPEC-PLAIN): they stay text.
+  assert.equal(typeAll("|", "# Title"), "\\# Title|");
+  assert.equal(typeAll("|", "> quoted"), "\\> quoted|");
+  for (const [text, cursor] of [["\\# ", 3], ["\\### ", 5], ["\\> ", 3], ["``\\`", 4]] as const) assert.equal(lineShortcut(text, cursor), null, text);
   // In the middle of a line they are literal.
   assert.equal(typeAll("x|", " # y"), "x # y|");
   // At the start of a paragraph with text after it.
   const { text } = at("|Already here");
-  let r = typeText(text, 0, 0, "#");
+  let r = typeText(text, 0, 0, "-");
   assert.ok(r.ok);
   r = typeText(r.text, r.cursor, r.cursor, " ");
   assert.ok(r.ok);
-  assert.equal(show(r), "\\# |Already here");
-  assert.equal(show(lineShortcut(r.text, r.cursor)!), "# |Already here");
+  assert.equal(show(r), "\\- |Already here");
+  assert.equal(show(lineShortcut(r.text, r.cursor)!), "- |Already here");
 });
 
 test("deleting removes visible characters only; markup goes with the last character (haiku 4c)", () => {

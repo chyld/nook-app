@@ -49,7 +49,6 @@ const sel = (s: EditorState) => [s.selection.main.anchor, s.selection.main.head]
 test("undo and redo after each kind of intent: one step each", () => {
   const cases: [string, Intent, [number, number]?][] = [
     ["one two", { type: "setMark", change: { kind: "bold", on: true } }, [4, 7]],
-    ["one two", { type: "setBlock", kind: "h2" }],
     ["one two", { type: "setList", kind: "bullet" }],
     ["one two", { type: "setLink", href: "https://e.com" }, [0, 3]],
     ["one two", { type: "insertBlock", what: "rule" }],
@@ -93,11 +92,11 @@ test("typing is grouped into one undo step; another intent is its own step on bo
   assert.equal(text(s), "x abc");
   // A line-start shortcut is its own step after the typed characters.
   let t = make("");
-  t = apply(t, { type: "insertText", text: "#" });
+  t = apply(t, { type: "insertText", text: "-" });
   t = apply(t, { type: "insertText", text: " " });
-  assert.equal(text(t), "# ");
+  assert.equal(text(t), "- ");
   t = cmd(t, undo);
-  assert.equal(text(t), "\\# ");
+  assert.equal(text(t), "\\- ");
 });
 
 /** Simulates CodeMirror's own composition transactions, then the finish of section 8. */
@@ -172,8 +171,8 @@ test("typing is cleared by a key move or a selection, kept by a plain click; cle
   assert.equal(t.field(editorField).typing.marks.length, 0);
   const u = cmd(t, undo);
   assert.equal(u.field(editorField).typing.marks.length, 0, "undo clears it");
-  const fx = s.update({ effects: setTyping.of({ marks: [], block: "h2" }) }).state;
-  assert.equal(fx.field(editorField).typing.block, "h2");
+  const fx = u.update({ effects: setTyping.of({ marks: [{ kind: "italic", on: true }] }) }).state;
+  assert.deepEqual(fx.field(editorField).typing.marks, [{ kind: "italic", on: true }], "the effect sets it");
 });
 
 test("Rich mode's filter drops a change that is not an intent; lets undo, a load and a composition through", () => {

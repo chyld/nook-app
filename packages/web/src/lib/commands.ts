@@ -4,7 +4,7 @@
 
 import type { Change, Intent, ToolbarState } from "../../../core/src/index.ts";
 
-export type CommandId = "font" | "size" | "size-down" | "size-up" | "bold" | "italic" | "underline" | "strike" | "code" | "color" | "bg" | "link" | "block" | "list" | "insert" | "styles";
+export type CommandId = "font" | "size" | "size-down" | "size-up" | "bold" | "italic" | "underline" | "strike" | "code" | "color" | "bg" | "link" | "list" | "insert" | "styles";
 
 export interface Command {
   id: CommandId;
@@ -37,7 +37,6 @@ export const COMMANDS: Command[] = [
   { id: "color", label: "Text colour", icon: "textcolor" },
   { id: "bg", label: "Highlight", icon: "highlight" },
   { id: "link", label: "Link", icon: "link", keys: ["Mod-k"], lit: (st) => st.link !== null },
-  { id: "block", label: "Block style" },
   { id: "list", label: "List" },
   { id: "insert", label: "Insert" },
   { id: "styles", label: "Styles", icon: "styles" },
@@ -45,18 +44,6 @@ export const COMMANDS: Command[] = [
 
 /** Clear formatting (Ctrl+\): not a control of its own (1.2), a key only. */
 export const CLEAR: Intent = { type: "setMark", change: { kind: "clear" } };
-
-export const BLOCKS: [value: string, label: string][] = [
-  ["paragraph", "Normal text"],
-  ["h1", "Heading 1"],
-  ["h2", "Heading 2"],
-  ["h3", "Heading 3"],
-  ["h4", "Heading 4"],
-  ["h5", "Heading 5"],
-  ["h6", "Heading 6"],
-  ["quote", "Quote"],
-  ["code", "Code block"],
-];
 
 export const LISTS: [value: string, label: string][] = [
   ["none", "No list"],

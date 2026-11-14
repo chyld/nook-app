@@ -5,7 +5,8 @@ Nook is a notes app for a few people, each with private notes. Every note is one
 edited with [Excalidraw](https://excalidraw.com) running inside Nook; each drawing is one
 ordinary Excalidraw file on disk, its images inside it. The specification is `SPEC2.md`, and
 `SPEC-DRAWINGS.md` for drawings; where the build departs from them, or they were silent,
-`SPEC-NOTES.md` says so. `PROGRESS.md` says what is done.
+`SPEC-NOTES.md` says so. `PROGRESS.md` says what is done. Since 2026-11-13 the editor makes no
+heading, quote or code block (`SPEC-PLAIN.md`): a note that already has one keeps it.
 
 ```
   packages/contract/   API routes, shapes, limits, patterns (TypeBox)
@@ -226,7 +227,7 @@ the raw text (LF line endings, no byte order mark); `select` sets the selection 
 it; `intent` applies an intent as the toolbar would and returns whether it was done. Intents
 are objects with a `type` named as in SPEC2 7.3 and arguments named as in its notation, for
 example `{ type: "setMark", change: { kind: "bold", on: true } }`,
-`{ type: "setBlock", kind: "h2" }`, `{ type: "setList", kind: "bullet" }`,
+`{ type: "setList", kind: "bullet" }`, `{ type: "insertBlock", what: "rule" }`,
 `{ type: "insertText", text: "x" }`, `{ type: "enter" }` (or just `"enter"`),
 `{ type: "setMeta", key: "title", value: "New title" }`. See `SPEC-NOTES.md`.
 

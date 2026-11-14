@@ -3,7 +3,7 @@
   // `describe` (or `describeCell` while a cell has the focus). It reads nothing else from the DOM.
   import type { Style } from "../../../contract/src/index.ts";
   import type { Change, Intent, ToolbarState } from "../../../core/src/index.ts";
-  import { BLOCKS, command, INSERTS, LISTS } from "../lib/commands.ts";
+  import { command, INSERTS, LISTS } from "../lib/commands.ts";
   import { HIGHLIGHTS, noteColour, PALETTE } from "../palette.ts";
   import { previewCss } from "../lib/styletext.ts";
   import { familyStyle } from "../lib/fontcss.ts";
@@ -84,7 +84,6 @@
   const bgItems = $derived([...HIGHLIGHTS.map(([n, hex]) => ({ value: n, label: n, swatch: hex, selected: !st.bg.mixed && st.bg.value === hex })), { value: "none", label: "None" }]);
   const hexOf = (name: string) => HIGHLIGHTS.find(([n]) => n === name)?.[1] ?? name;
 
-  const blockLabel = $derived(BLOCKS.find(([v]) => v === st.block)?.[1] ?? "Block");
   const listLabel = $derived(LISTS.find(([v]) => v === st.list)?.[1] ?? "List");
 
   // Link panel.
@@ -172,7 +171,6 @@
     </Popover>
   </div>
   <div class="group g3">
-    <Menu label={blockLabel} title="Block style" testid="cmd-block" items={BLOCKS.map(([v, l]) => ({ value: v, label: l, selected: st.block === v }))} disabled={!can("block")} onselect={(v) => send({ type: "setBlock", kind: v as "h1" })} />
     <Menu label={listLabel} title="List" testid="cmd-list" items={LISTS.map(([v, l]) => ({ value: v, label: l, selected: st.list === v }))} disabled={!can("list")} onselect={(v) => send({ type: "setList", kind: v as "bullet" })} />
     <Menu label="Insert" title="Insert" testid="cmd-insert" items={INSERTS.map(([v, l]) => ({ value: v, label: l }))} disabled={!can("insert")} onselect={(v) => (v === "photo" ? onphoto() : send({ type: "insertBlock", what: v as "table" }))} />
   </div>

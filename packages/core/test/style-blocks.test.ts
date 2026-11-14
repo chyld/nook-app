@@ -6,24 +6,21 @@ import { blockStyleAt, insertBlock, listKindAt, setBlockStyle, toggleList } from
 
 const all = (t: string) => [0, t.length] as const;
 
-test("block style: headings, normal text, quote, code block", () => {
+test("block style: a heading or a quote becomes normal text", () => {
   const ok = (r: ReturnType<typeof setBlockStyle>) => {
     assert.ok(r.ok, r.ok ? "" : r.reason);
     return r.text;
   };
-  assert.equal(ok(setBlockStyle("Title here", 0, 3, "h1")), "# Title here");
-  assert.equal(ok(setBlockStyle("# Title here", 3, 5, "h3")), "### Title here");
   assert.equal(ok(setBlockStyle("## Title ##", 3, 5, "paragraph")), "Title");
-  assert.equal(ok(setBlockStyle("# Title\n{color=red}", 2, 4, "h2")), "## Title\n{color=red}");
-  assert.equal(ok(setBlockStyle("Some **bold** text", 0, 4, "quote")), "> Some **bold** text");
+  assert.equal(ok(setBlockStyle("# Title\n{color=red}", 2, 4, "paragraph")), "Title\n{color=red}", "the attribute line stays");
   assert.equal(ok(setBlockStyle("> one\n> two", 2, 4, "paragraph")), "one\ntwo");
-  assert.equal(ok(setBlockStyle("plain code-like text", 0, 5, "code")), "```\nplain code-like text\n```");
-  assert.equal(ok(setBlockStyle("```\na*b\nc\n```", 4, 5, "paragraph")), "a\\*b  \nc");
-  // Refusals, with the reason.
-  assert.deepEqual(setBlockStyle("two\nlines", 0, 2, "h1"), { ok: false, reason: "a heading is one line; this paragraph has several" });
-  assert.deepEqual(setBlockStyle("**bold**", 0, 2, "code"), { ok: false, reason: "a code block cannot keep the text's formatting" });
+  // A code block is not turned into text here: it is left by Enter on its empty last line.
+  assert.equal(ok(setBlockStyle("```\ncode\n```", 6, 6, "paragraph")), "```\ncode\n```");
   // Several blocks at once; text outside them unchanged.
-  assert.equal(ok(setBlockStyle("one\n\ntwo\n\nthree", 0, 8, "h2")), "## one\n\n## two\n\nthree");
+  assert.equal(ok(setBlockStyle("# one\n\n> two\n\n### three", 0, 12, "paragraph")), "one\n\ntwo\n\n### three");
+  // The selection stays on the same visible characters; a caret stays after the same one.
+  assert.deepEqual(setBlockStyle("## Text", 7, 7, "paragraph"), { ok: true, text: "Text", from: 4, to: 4 });
+  assert.deepEqual(setBlockStyle("# Title", 2, 4, "paragraph"), { ok: true, text: "Title", from: 0, to: 2 });
 });
 
 test("block style at the selection, for the toolbar", () => {

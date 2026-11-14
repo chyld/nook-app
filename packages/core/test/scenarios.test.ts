@@ -125,26 +125,22 @@ test("7.6 typing is literal; typed text keeps the style around it", () => {
   assert.equal(typeAll("Issue ¦", "#12"), "Issue #12¦");
 });
 
-test("7.6 line-start shortcuts become the block, as `then`", () => {
-  assert.equal(typeAll("¦", "# Title"), "# Title¦");
-  assert.equal(typeAll("¦", "#### Four"), "#### Four¦");
+test("7.6 line-start shortcuts become the list, as `then`", () => {
   assert.equal(typeAll("¦", "- item"), "- item¦");
   assert.equal(typeAll("¦", "* item"), "- item¦");
   assert.equal(typeAll("¦", "1. first"), "1. first¦");
   assert.equal(typeAll("¦", "[] task"), "- [ ] task¦");
-  assert.equal(typeAll("¦", "> quoted"), "> quoted¦");
-  assert.equal(typeAll("¦", "```"), "```\n¦\n```");
   assert.equal(typeAll("x¦", " # y"), "x # y¦", "in the middle of a line they are literal");
   // The typed characters go in first as literal text; the shortcut is a second step.
-  const r = reduce(parse("\\#¦"), { type: "insertText", text: " " }, "rich");
+  const r = reduce(parse("\\-¦"), { type: "insertText", text: " " }, "rich");
   assert.ok(r.ok);
-  assert.equal(show(r.doc), "\\# ¦");
+  assert.equal(show(r.doc), "\\- ¦");
   assert.deepEqual(r.then, { type: "shortcut" });
-  check([["\\# ¦", { type: "shortcut" }, "# ¦"], ["plain¦", { type: "shortcut" }, { refused: /no shortcut/ }]]);
+  check([["\\- ¦", { type: "shortcut" }, "- ¦"], ["plain¦", { type: "shortcut" }, { refused: /no shortcut/ }]]);
 });
 
-test("7.4.3 typing: marks and block wait for the next typed text", () => {
-  const bold: Typing = { marks: [B], block: null };
+test("7.4.3 typing: marks wait for the next typed text", () => {
+  const bold: Typing = { marks: [B] };
   check([["one ¦", { type: "insertText", text: "x" }, "one **x¦**"]], "rich", bold);
   // A space typed alone leaves `typing` waiting.
   let r = reduce(parse("one¦", bold), { type: "insertText", text: " " }, "rich");
@@ -153,12 +149,7 @@ test("7.4.3 typing: marks and block wait for the next typed text", () => {
   // Any other change clears it.
   r = reduce(parse("one¦", bold), { type: "deleteBackward" }, "rich");
   assert.ok(r.ok);
-  assert.deepEqual(r.doc.typing, { marks: [], block: null });
-  check([["¦", { type: "insertText", text: "T" }, "## T¦"]], "rich", { marks: [], block: "h2" });
-  check([["¦", { type: "insertText", text: "x" }, "```\nx¦\n```"]], "rich", { marks: [], block: "code" });
-  r = reduce(parse("a¦", { marks: [], block: "h2" }), { type: "insertText", text: " " }, "rich");
-  assert.ok(r.ok);
-  assert.equal(r.doc.typing.block, "h2", "a space typed alone also leaves typing.block waiting");
+  assert.deepEqual(r.doc.typing, { marks: [] });
 });
 
 test("7.4.3 Enter carries the style on (styleToCarry)", () => {
@@ -174,7 +165,7 @@ test("7.4.3 Enter carries the style on (styleToCarry)", () => {
   assert.deepEqual(carry("`code`¦"), [], "nothing out of code");
   assert.deepEqual(carry("[big]{size=18pt}¦"), [{ kind: "size", pt: 18 }]);
   assert.deepEqual(carry("---\nsize: 18pt\n---\n[big]{size=18pt}¦"), [], "no size equal to the note's");
-  assert.deepEqual(carry("plain¦", { marks: [{ kind: "italic", on: true }], block: null }), [{ kind: "italic", on: true }], "the waiting marks first");
+  assert.deepEqual(carry("plain¦", { marks: [{ kind: "italic", on: true }] }), [{ kind: "italic", on: true }], "the waiting marks first");
 });
 
 test("setMark, applyStyle and setLink (7.3, 7.6, 9.4)", () => {
@@ -224,33 +215,12 @@ test("7.4.5 Raw mode: the toolbar's intents work on the same text; typing is pla
       ["abc¦", { type: "enter" }, "abc\n¦"],
       ["abc¦", { type: "deleteBackward" }, "ab¦"],
       ["a¦bc", { type: "deleteForward" }, "a¦c"],
-      ["x\n\n¦", { type: "setBlock", kind: "h2" }, "x\n\n## ¦", "no typing: the marks at once"],
-      ["x\n\n¦", { type: "setBlock", kind: "code" }, "x\n\n```\n¦\n```"],
-      ["```\ncode\n¦\n```", { type: "setBlock", kind: "h3" }, "```\ncode\n```\n\n### ¦"],
+      ["x\n\n¦", { type: "setList", kind: "bullet" }, "x\n\n- ¦", "no typing: the marks at once"],
       ["Text¦", { type: "setList", kind: "bullet" }, "- Text¦"],
       ["one ¦two", { type: "paste", plain: "*x*" }, "one *x*¦two"],
     ],
     "raw",
   );
-});
-
-test("7.6 block styles exclude each other (7.2 new)", () => {
-  check([
-    ["Text¦", { type: "setBlock", kind: "h2" }, "## Text¦"],
-    ["## Text¦", { type: "setBlock", kind: "h2" }, "## Text¦", "already: nothing changes"],
-    ["## Text¦", { type: "setBlock", kind: "quote" }, "> Text¦", "the heading goes first"],
-    ["> ## Text¦", { type: "setBlock", kind: "h1" }, "# Text¦", "quote and heading both go first"],
-    ["## Text¦", { type: "setBlock", kind: "paragraph" }, "Text¦"],
-    ["Text¦", { type: "setBlock", kind: "code" }, "```\nText¦\n```", "the caret stays after the text, not on the closing fence's line"],
-    ["```\nco¦de\n```", { type: "setBlock", kind: "h2" }, "## co¦de", "inside a code block, another style converts it"],
-    ["```\nco¦de\n```", { type: "setBlock", kind: "paragraph" }, "co¦de"],
-    ["```\ncode\n¦\n```", { type: "setBlock", kind: "quote" }, "```\ncode\n```\n\n¦", "on its empty line: leaveCode"],
-    ["```\na\n\nb¦\n```", { type: "setBlock", kind: "h1" }, "```\na\n\nb\n```\n\n¦", "cannot be converted: leaveCode"],
-  ]);
-  const r = reduce(parse("x\n\n¦"), { type: "setBlock", kind: "h2" }, "rich");
-  assert.ok(r.ok && r.doc.typing.block === "h2" && r.edit === null, "on an empty line it becomes typing.block");
-  const c = reduce(parse("```\ncode\n¦\n```"), { type: "setBlock", kind: "quote" }, "rich");
-  assert.ok(c.ok && c.doc.typing.block === "quote", "after leaving a code block the style is typing.block");
 });
 
 test("7.6 lists (7.2 new): markers on empty lines, values not toggles", () => {
@@ -375,13 +345,11 @@ test("describe and describeCell: on, off and mixed", () => {
   assert.deepEqual(d("# h¦").size, { mixed: false, value: 24 });
   assert.equal(d("- a¦").list, "bullet");
   assert.equal(d("- ¦").list, "bullet");
-  assert.equal(d("# h¦").block, "h1");
   assert.equal(d("[l](https://e.com)¦ x").link, "https://e.com");
-  assert.equal(d("plain¦", { marks: [B], block: null }).bold, "on", "typing.marks shown");
-  assert.equal(d("¦", { marks: [], block: "quote" }).block, "quote", "typing.block shown");
+  assert.equal(d("plain¦", { marks: [B] }).bold, "on", "typing.marks shown");
   assert.equal(describeCell("**a**b", 0, 0).bold, "mixed", "nothing selected: the whole cell");
   assert.equal(describeCell("**a**b", 0, 1).bold, "on");
-  assert.equal(describeCell("**a**b", 0, 1).can.block, false);
+  assert.equal(describeCell("**a**b", 0, 1).can.list, false);
 });
 
 test("the selection after a widget or settings edit is mapped through the edit (7.2 new)", () => {
