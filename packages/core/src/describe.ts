@@ -7,7 +7,7 @@ import { cellChars } from "./style/cells.ts";
 import type { Model } from "./style/model.ts";
 import { noteSizeOf } from "./meta.ts";
 import { caretChar, listAt, shownSize } from "./reduce.ts";
-import type { Doc, ToolbarState, Tri, Val } from "./types.ts";
+import type { Change, Doc, ToolbarState, Tri, Val } from "./types.ts";
 
 /** The command ids of the toolbar (9.4, section 11). */
 export const COMMANDS = ["font", "size", "size-down", "size-up", "bold", "italic", "underline", "strike", "code", "color", "bg", "link", "list", "insert", "styles"] as const;
@@ -58,6 +58,38 @@ function can(st: { inCode: boolean; caret: boolean; link: string | null }, cell 
   return out;
 }
 
+/** A waiting look laid over a state: what the next typed text will get. `size` gives the size to
+ *  show for a waiting size (in the note, as `−` and `+` read it). */
+function waitingOver(st: Omit<ToolbarState, "list" | "caret" | "can">, marks: Change[], size: (pt: number) => number): void {
+  for (const c of marks) {
+    switch (c.kind) {
+      case "bold":
+      case "italic":
+      case "strike":
+      case "underline":
+        st[c.kind] = c.on ? "on" : "off";
+        break;
+      case "code":
+        st.code = c.on ? "on" : "off";
+        break;
+      case "color":
+      case "bg":
+      case "font":
+        st[c.kind] = { mixed: false, value: c.value };
+        break;
+      case "size":
+        st.size = { mixed: false, value: size(c.pt) };
+        break;
+      case "clear":
+        st.bold = st.italic = st.strike = st.underline = "off";
+        st.color = st.bg = st.font = { mixed: false, value: null };
+        break;
+      default:
+        break;
+    }
+  }
+}
+
 /** The toolbar's state for a document (the caret's style overlaid with `typing`). */
 export function describe(doc: Doc, model: Model): ToolbarState {
   const from = Math.min(doc.sel.anchor, doc.sel.head);
@@ -72,44 +104,15 @@ export function describe(doc: Doc, model: Model): ToolbarState {
   const codeBlock = (c: Ch) => m.runs.blocks[c.block].kind === "code";
   const st = state(chars, codeBlock);
   if (isCaret && chars.length === 0) st.size = { mixed: false, value: noteSizeOf(m) };
-  if (isCaret) {
-    // What is typed next: the waiting marks win over the text at the caret.
-    for (const c of doc.typing.marks) {
-      switch (c.kind) {
-        case "bold":
-        case "italic":
-        case "strike":
-        case "underline":
-          st[c.kind] = c.on ? "on" : "off";
-          break;
-        case "code":
-          st.code = c.on ? "on" : "off";
-          break;
-        case "color":
-        case "bg":
-        case "font":
-          st[c.kind] = { mixed: false, value: c.value };
-          break;
-        case "size":
-          // The waiting size as `−` and `+` read it.
-          st.size = { mixed: false, value: shownSize(m, doc.sel.head, doc.typing) };
-          break;
-        case "clear":
-          st.bold = st.italic = st.strike = st.underline = "off";
-          st.color = st.bg = st.font = { mixed: false, value: null };
-          break;
-        default:
-          break;
-      }
-    }
-  }
+  // What is typed next: the waiting marks win over the text at the caret.
+  if (isCaret) waitingOver(st, doc.typing.marks, () => shownSize(m, doc.sel.head, doc.typing));
   const list = listAt(m.text, from, to);
   return { ...st, list, caret: isCaret, can: can({ inCode: st.inCode, caret: isCaret, link: st.link }) };
 }
 
 /** The toolbar's state while a table cell has the focus: `from` and `to` count the cell's
  *  visible characters; with nothing selected, the whole cell (7.7). */
-export function describeCell(cellSource: string, from: number, to: number): ToolbarState {
+export function describeCell(cellSource: string, from: number, to: number, waiting: Change[] = []): ToolbarState {
   const all = cellChars(cellSource) ?? [];
   let a = Math.max(0, Math.min(from, to));
   let b = Math.min(all.length, Math.max(from, to));
@@ -120,6 +123,8 @@ export function describeCell(cellSource: string, from: number, to: number): Tool
   const chars = all.slice(a, b);
   const st = state(chars, () => false);
   if (chars.length === 0) st.size = { mixed: false, value: null };
+  // A look waiting in an empty cell (SPEC-CELLS 2.7) is shown as the cell's.
+  waitingOver(st, waiting, (pt) => pt);
   const caret = from === to;
   return { ...st, list: "none", caret, can: can({ inCode: false, caret: false, link: st.link }, true) };
 }

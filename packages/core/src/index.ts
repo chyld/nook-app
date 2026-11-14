@@ -15,7 +15,7 @@ export { stepSize, ptValue, selectedChars, MIN_SIZE, MAX_SIZE } from "./style/ap
 export { copySelection } from "./style/typing.ts";
 export { linkAt, tasks } from "./style/widgets.ts";
 export { parseTable, writeTable, type Grid } from "./style/tables.ts";
-export { cellMarkdown, cellChars, shownLength, PLAIN, type CellStyle } from "./style/cells.ts";
+export { cellBaseSize, cellMarkdown, cellChars, shownLength, PLAIN, type CellStyle } from "./style/cells.ts";
 export { lineEndings, toLf, utf8Length, decodeUtf8, encodeUtf8, hasBom, BOM } from "./text.ts";
 export { appendToNote, droppedImage, firstLineEnding, hasFrontMatter, liveElements, newNoteText, noteIsBlank, splitNote, withFrontMatter, withNook, yamlQuote } from "./agentdoc.ts";
 export { serializeDrawing, emptyDrawing, sceneOf, drawingFacts, drawingProblem, drawingSignature, drawingText, keptAppState, nookOf, parseDrawing, usedFileIds, KEPT_APP_STATE, type DrawingFacts, type DrawingNook, type DrawingProblem, type DrawingScene } from "./drawing.ts";

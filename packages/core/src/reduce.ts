@@ -5,7 +5,7 @@
 
 import { applyStyle, stepSize, type Change, type Result as StyleResult } from "./style/apply.ts";
 import { blockStyleAt, insertBlock, listKindAt, seen, toggleList, touchedBlocks, type BlockResult } from "./style/blocks.ts";
-import { cellChars, cellMarkdown, shownLength, styleCellText } from "./style/cells.ts";
+import { cellBaseSize, cellChars, cellMarkdown, shownLength, styleCellText } from "./style/cells.ts";
 import { buildModel, type Model } from "./style/model.ts";
 import { addColumn, addRow, parseTable, removeColumn, removeRow, replaceTable, type Grid } from "./style/tables.ts";
 import { deleteAt, deleteRange, enter, insertBlocks, lineBreak, lineShortcut, pasteMarkdown, pastePlain, typeText, type Edit } from "./style/typing.ts";
@@ -562,9 +562,12 @@ function styleInCell(source: string, from: number, to: number, change: Change): 
  * none is written. A setting the cell cannot hold is left out, with its reason.
  */
 function styleCellWith(source: string, from: number, to: number, style: SavedStyle | "reset"): { ok: true; text: string; from: number; to: number; left: string[] } | { ok: false; reason: string } {
+  return lookInCell(source, from, to, style === "reset" ? [{ kind: "clear" }] : changesOf(style, cellBaseSize()));
+}
+
+/** Settings given to a cell's text one after another, each set (not toggled), as one change. */
+function lookInCell(source: string, from: number, to: number, changes: Change[]): { ok: true; text: string; from: number; to: number; left: string[] } | { ok: false; reason: string } {
   if (shownLength(source) === 0) return { ok: false, reason: "type something in the cell first" };
-  const base = (cellChars("x") ?? [])[0]?.style.size ?? 12;
-  const changes: Change[] = style === "reset" ? [{ kind: "clear" }] : changesOf(style, base);
   let cur = source;
   let done = 0;
   const left: string[] = [];
@@ -583,30 +586,42 @@ function styleCellWith(source: string, from: number, to: number, style: SavedSty
   return { ok: true, text: cur, from, to, left: [...new Set(left)] };
 }
 
+/** A cell's text as it is written, with the look that waited in the cell while it was empty
+ *  (SPEC-CELLS 2.7): given to all of the text, each setting set. With no text, nothing. */
+function withLook(text: string, look: Change[] | undefined): { text: string; left: string[] } {
+  if (!look?.length || shownLength(text) === 0) return { text, left: [] };
+  const r = lookInCell(text, 0, 0, look);
+  return r.ok ? { text: r.text, left: r.left } : { text, left: [r.reason] };
+}
+
 function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: PendingCell): Step {
   const t = tableAt(m, at);
   if (!t) return { reason: "there is no table here" };
   if (!t.grid) return { reason: "this table can only be edited as text" };
   let g: Grid = t.grid;
   const named = new Set<string>();
+  // The settings of a look or a saved style that a cell could not hold, each with its reason.
+  let left: string[] = [];
   if (pending) {
     const c = cellText(pending);
     if (!c.ok) return { reason: c.reason };
-    const next = setCellIn(g, pending.row, pending.col, c.text);
+    const typed = withLook(c.text, pending.look);
+    left = typed.left;
+    const next = setCellIn(g, pending.row, pending.col, typed.text);
     if (!next) return { reason: "there is no such cell" };
     g = next;
     named.add(`${pending.row}:${pending.col}`);
   }
   let cellSel: { row: number; col: number; from: number; to: number } | null = null;
   let shape = false;
-  // The settings of a saved style that the cell could not hold, each with its reason.
-  let left: string[] = [];
   switch (op.op) {
     case "setCell":
     case "setCellSource": {
       const c = cellText(op);
       if (!c.ok) return { reason: c.reason };
-      const next = setCellIn(g, op.row, op.col, c.text);
+      const typed = withLook(c.text, op.look);
+      left = [...left, ...typed.left];
+      const next = setCellIn(g, op.row, op.col, typed.text);
       if (!next) return { reason: "there is no such cell" };
       g = next;
       named.add(`${op.row}:${op.col}`);
@@ -630,7 +645,7 @@ function tableEdit(doc: Doc, m: Model, at: number, op: TableOp, pending?: Pendin
       g = setCellIn(g, op.row, op.col, r.text)!;
       named.add(`${op.row}:${op.col}`);
       cellSel = { row: op.row, col: op.col, from: r.from, to: r.to };
-      left = r.left;
+      left = [...left, ...r.left];
       break;
     }
     case "addRow":

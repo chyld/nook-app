@@ -31,15 +31,33 @@ and said to go ahead, so the choices below were made here and are listed in sect
    typed in the cell and not yet written goes in with it and is not lost.
 6. **A setting the cell cannot hold is skipped and named**, and the others are applied, as on
    the note's text.
-7. **In an empty cell** there is nothing to style: "Type something in the cell first", as for
-   the single controls. In a cell edited as Markdown: the existing message.
+7. **In an empty cell the look waits for the text.** A saved style, or a single control (Bold,
+   a colour, a size; Ctrl+B, Ctrl+I, Ctrl+U), picked in an empty cell changes nothing in the
+   note yet. The toolbar shows it as the cell's, and the text typed there is drawn in it. It
+   is written with the text, as one change, when the cell is written (left, Tab, Enter,
+   Save): typing and undo in the cell are what they are in any cell. Until then picks add up
+   as on an empty line of the note (a style replaces what waited; a single control joins it;
+   Default (reset) clears it), and they are for all of the cell's text. Leaving the cell
+   with nothing typed, or Escape, drops the look: it does not follow the caret to another
+   cell, and it is not there when the caret comes back. In a cell edited as Markdown: the
+   existing message.
 8. **The focus stays in the cell** after any toolbar control, the size box included, so the
    next control lands in the same cell.
 9. **With only the caret in a cell, a control leaves the caret where it was**, not the whole
    cell selected: what is typed next is added to the cell's text.
 
+10. **Text typed in a cell is not lost by way of the toolbar.** A cell left for a field of the
+    toolbar (the size box, a style's name) is not written yet; when another cell was then
+    clicked, what had been typed was dropped, in any cell, styled or not. It is now written
+    before the other cell is entered.
+
 ## 3. In the code
 
+- `core`: text typed in a cell may carry `look`, the look that waited there (`PendingCell`,
+  `setCell`); `tableEdit` gives it to that text as it is written (`withLook`), whichever
+  operation writes it. `describeCell` lays a waiting look over the cell's state for the
+  toolbar. `web`: the cell keeps the look (`waiting`), shows it as CSS on the cell while the
+  person types (`lookCss`), and drops it when the cell is left empty.
 - `core`: a table operation `applyStyleCell` (`types.ts`, `tableEdit` in `reduce.ts`). It takes
   the style's settings from `changesOf`, as `useStyle` does, and applies each through
   `styleInCell`, which sets. The cell's own base size stands in for a style with no size.
@@ -56,5 +74,9 @@ and said to go ahead, so the choices below were made here and are listed in sect
    the next typing, as in a paragraph; opus the whole cell. The whole cell was chosen: it is
    what the single controls already do in a cell, "a style for this cell" is the request, and a
    cell has no waiting look to build on. The lost-text problem haiku raised is rule 9.
-2. **An empty cell is not styled ahead of typing** (rule 7). Type the text, then pick the style.
+2. **An empty cell was first not styled ahead of typing** ("Type something in the cell
+   first"). The owner tried exactly that (blank cell, pick a style, type) and asked for it, so
+   rule 7 was built the same day. A first version wrote the look at the first letter typed;
+   the beta agents showed that this left the look behind after Tab or Escape and disturbed
+   undo, so the look is now kept on the cell and written with the text when the cell is.
 3. **A style replaces every setting it holds,** bold off included, as on the note's text.

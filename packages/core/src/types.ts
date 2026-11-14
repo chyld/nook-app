@@ -58,8 +58,8 @@ export interface SavedStyle {
 }
 
 export type TableOp =
-  | { op: "setCell"; row: number; col: number; runs: CellRun[] }
-  | { op: "setCellSource"; row: number; col: number; markdown: string }
+  | { op: "setCell"; row: number; col: number; runs: CellRun[]; look?: Change[] }
+  | { op: "setCellSource"; row: number; col: number; markdown: string; look?: Change[] }
   | { op: "styleCell"; row: number; col: number; from: number; to: number; change: Change }
   /** A saved style, or the reset, on a cell's text: all its settings as one change (SPEC-CELLS). */
   | { op: "applyStyleCell"; row: number; col: number; from: number; to: number; style: SavedStyle | "reset" }
@@ -69,7 +69,9 @@ export type TableOp =
   | { op: "removeColumn"; col: number };
 
 /** A focused cell's unsaved content, written in the same edit as the operation (7.7). */
-export type PendingCell = { row: number; col: number; runs: CellRun[] } | { row: number; col: number; markdown: string };
+/** A cell's text as typed and not yet written. `look`: the look that waited in the cell while it
+ *  was empty (SPEC-CELLS 2.7), given to that text as it is written. */
+export type PendingCell = ({ row: number; col: number; runs: CellRun[] } | { row: number; col: number; markdown: string }) & { look?: Change[] };
 
 export type Intent =
   | { type: "insertText"; text: string }

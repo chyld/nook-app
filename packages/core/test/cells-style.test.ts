@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reduce, type Doc, type SavedStyle, type TableOp } from "../src/index.ts";
+import { addMark, cellBaseSize, changesOf, describeCell, reduce, type Change, type Doc, type SavedStyle, type TableOp } from "../src/index.ts";
 
 const style = (s: Partial<SavedStyle>): SavedStyle => ({ name: "s", bold: false, italic: false, underline: false, strike: false, size: null, font: null, color: null, bg: null, ...s });
 const LOUD = style({ bold: true, underline: true, size: 18, font: "mono", color: "red", bg: "#fff176" });
@@ -13,7 +13,7 @@ const table = (a: string, b = "pears", head = "| A | B |") => `Before\n\n${head}
 const ap = (s: SavedStyle | "reset", from = 0, to = 0, row = 1, col = 0): TableOp => ({ op: "applyStyleCell", row, col, from, to, style: s });
 
 /** The operations one after another; the note's text, and what was skipped or why it stopped. */
-function edit(text: string, ops: TableOp[], pending?: { row: number; col: number; markdown: string }): { text: string; skipped: string[]; refused: string | null } {
+function edit(text: string, ops: TableOp[], pending?: { row: number; col: number; markdown: string; look?: Change[] }): { text: string; skipped: string[]; refused: string | null } {
   let doc: Doc = { text, sel: { anchor: 0, head: 0 }, typing: { marks: [] } };
   const skipped: string[] = [];
   for (const op of ops) {
@@ -75,4 +75,45 @@ test("a saved style on a cell: an empty cell is refused; text typed and not yet 
   assert.equal(typed.refused, null);
   assert.equal(cells(typed.text), "| [*apples*]{color=blue} | pears |");
   assert.match(edit(table("apples"), [ap(LOUD, 0, 0, 5, 0)]).refused ?? "", /no such cell/);
+});
+
+test("a look that waited in an empty cell is written with the text typed there, as one change", () => {
+  const loud = changesOf(LOUD, cellBaseSize());
+  /** The cell is written as it is when it is left: `setCell` with the typed text and the look. */
+  const leave = (text: string, typed: string, look: Change[], row = 1, col = 0) => edit(text, [{ op: "setCellSource", row, col, markdown: typed, look }]);
+  assert.equal(leave(table(""), "apples", loud).refused, null);
+  assert.equal(cells(leave(table(""), "apples", loud).text), `| ${LOUD_MD} | pears |`);
+  // A style with no size writes none; single controls that waited together are all given.
+  assert.equal(cells(leave(table(""), "apples", changesOf(QUIET, cellBaseSize())).text), "| [*apples*]{color=blue} | pears |");
+  const picked = addMark(addMark([], { kind: "bold", on: true }), { kind: "color", value: "red" });
+  assert.equal(cells(leave(table(""), "apples", picked).text), "| [**apples**]{color=red} | pears |");
+  // A style, then a single control on top of it; a control turned on and off again leaves nothing.
+  assert.equal(cells(leave(table(""), "apples", addMark(changesOf(QUIET, cellBaseSize()), { kind: "bold", on: true })).text), "| [***apples***]{color=blue} | pears |");
+  assert.equal(cells(leave(table(""), "apples", addMark(addMark([], { kind: "bold", on: true }), { kind: "bold", on: false })).text), "| apples | pears |");
+  // All of the text typed has it, whatever was typed.
+  assert.equal(cells(leave(table(""), "grapes are good, é!", picked).text), "| [**grapes are good, é!**]{color=red} | pears |");
+  // Nothing typed: nothing is written, look or no look. The other cell is never touched.
+  assert.equal(leave(table(""), "", loud).text, table(""));
+  assert.equal(cells(leave(table("", "pears"), "apples", loud).text).split("|")[2], " pears ");
+  // The look travels with the typed text in any operation that writes it (Tab in the last cell adds a row).
+  const added = edit(table(""), [{ op: "addRow", after: 1 }], { row: 1, col: 0, markdown: "apples", look: loud });
+  assert.equal(added.refused, null);
+  assert.ok(added.text.includes(`| ${LOUD_MD} | pears |\n| | |`), added.text);
+  // With no look the same operations write plain text, as before.
+  assert.equal(cells(edit(table(""), [{ op: "setCellSource", row: 1, col: 0, markdown: "apples" }]).text), "| apples | pears |");
+});
+
+test("the toolbar's state for an empty cell shows the look waiting there", () => {
+  const plain = describeCell("", 0, 0);
+  assert.equal(plain.bold, "off");
+  assert.deepEqual(plain.color, { mixed: false, value: null });
+  const waiting = describeCell("", 0, 0, changesOf(LOUD, cellBaseSize()));
+  assert.equal(waiting.bold, "on");
+  assert.equal(waiting.underline, "on");
+  assert.equal(waiting.italic, "off");
+  assert.deepEqual(waiting.color, { mixed: false, value: "red" });
+  assert.deepEqual(waiting.size, { mixed: false, value: 18 });
+  assert.deepEqual(waiting.font, { mixed: false, value: "mono" });
+  // In a cell with text nothing waits, so nothing is laid over it.
+  assert.equal(describeCell("apples", 0, 0).bold, "off");
 });

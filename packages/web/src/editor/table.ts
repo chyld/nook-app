@@ -5,7 +5,9 @@
 // cell's content as `pending`, so the cell and the operation are one edit and one undo step.
 
 import type { EditorView } from "@codemirror/view";
-import { cellChars, cellMarkdown, parseTable, PLAIN, type CellRun, type CellStyle, type Change, type PendingCell, type SavedStyle, type TableOp } from "../../../core/src/index.ts";
+import { addMark, cellBaseSize, cellChars, cellMarkdown, changesOf, parseTable, PLAIN, stepSize, type CellRun, type CellStyle, type Change, type PendingCell, type SavedStyle, type TableOp } from "../../../core/src/index.ts";
+import { cssString } from "../lib/fontcss.ts";
+import { noteColour, ON_HIGHLIGHT } from "../palette.ts";
 import { dispatchIntent, notify } from "./dispatch.ts";
 import { editorField, richOptions } from "./field.ts";
 
@@ -26,6 +28,11 @@ export interface ActiveCell {
   style(change: Change): void;
   /** A saved style, or the reset, on the selection in the cell or on the whole cell (SPEC-CELLS). */
   applyStyle(style: SavedStyle | "reset"): void;
+  /** The look waiting in the cell while it is empty: what the text typed there will get. */
+  waiting(): Change[];
+  /** Gives the cell the focus back from the toolbar (the size box), the caret where it was. A
+   *  click back into the cell does not come this way: its caret is the click's. */
+  refocus(): void;
   /** Leaves the cell, writing what was typed in it. */
   leave(): void;
   /** Writes what was typed in the cell if it changed; the cell keeps the focus otherwise. */
@@ -48,6 +55,11 @@ export function activeCell(): ActiveCell | null {
 export function onCellChange(f: () => void): () => void {
   listeners.add(f);
   return () => listeners.delete(f);
+}
+
+/** The focus back to the cell being edited, from a field of the toolbar. */
+export function refocusActiveCell(): void {
+  active?.refocus();
 }
 
 function setActive(c: ActiveCell | null): void {
@@ -79,6 +91,40 @@ function fontOf(v: string): string {
 }
 
 /** What a cell shows, as runs of text with their styles; null when it holds something else. */
+/** The CSS properties a waiting look is shown with on its cell. */
+const LOOK_CSS = ["font-weight", "font-style", "text-decoration-line", "color", "background-color", "font-family", "font-size"];
+
+/** A waiting look as CSS for the cell it waits in (SPEC-CELLS 2.7): what the text typed there
+ *  will look like once it is written with it. */
+function lookCss(changes: Change[]): [string, string][] {
+  const out = new Map<string, string>();
+  const deco = new Set<string>();
+  let bg = false;
+  for (const c of changes) {
+    // Off is the cell's own (a header cell is bold of itself, and stays so when written).
+    if (c.kind === "bold") c.on ? out.set("font-weight", "bold") : out.delete("font-weight");
+    else if (c.kind === "italic") c.on ? out.set("font-style", "italic") : out.delete("font-style");
+    else if (c.kind === "underline") c.on ? deco.add("underline") : deco.delete("underline");
+    else if (c.kind === "strike") c.on ? deco.add("line-through") : deco.delete("line-through");
+    else if (c.kind === "color") c.value ? out.set("color", noteColour(c.value)) : out.delete("color");
+    else if (c.kind === "bg") {
+      bg = !!c.value;
+      c.value ? out.set("background-color", noteColour(c.value)) : out.delete("background-color");
+    } else if (c.kind === "font") {
+      const f = (c.value ?? "").toLowerCase();
+      c.value ? out.set("font-family", f === "serif" || f === "sans" || f === "mono" ? `var(--note-font-${f})` : cssString(c.value)) : out.delete("font-family");
+    } else if (c.kind === "size") out.set("font-size", `${Math.round(c.pt * 100) / 100}pt`);
+    else if (c.kind === "clear") {
+      out.clear();
+      deco.clear();
+      bg = false;
+    }
+  }
+  if (deco.size) out.set("text-decoration-line", [...deco].join(" "));
+  if (bg && !out.has("color")) out.set("color", ON_HIGHLIGHT);
+  return [...out];
+}
+
 function domRuns(root: HTMLElement, measure: boolean): CellRun[] | null {
   const out: CellRun[] = [];
   let bad = false;
@@ -356,6 +402,9 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
     initial: string;
     /** Makes the cell the focused one again, when a write left the table drawn as it was. */
     reenter?: () => void;
+    /** The look chosen while the cell was empty (SPEC-CELLS 2.7): shown on the cell while it is
+     *  typed in, and written with the text when the cell is. */
+    waiting: Change[];
   }
   const cells: Cell[][] = trs.map((tr, row) =>
     [...tr.children].map((el, col) => {
@@ -363,7 +412,7 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       e.dataset.testid = "table-cell";
       e.dataset.row = String(row);
       e.dataset.col = String(col);
-      return { el: e, row, col, source: grid.rows[row][col], rich: domRuns(e, false) !== null, initial: "" };
+      return { el: e, row, col, source: grid.rows[row][col], rich: domRuns(e, false) !== null, initial: "", waiting: [] };
     }),
   );
   let last: { row: number; col: number } | null = null;
@@ -379,7 +428,7 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
     const runs = domRuns(c.el, true);
     if (!runs) return null;
     if (JSON.stringify(runs) === c.initial) return undefined;
-    return { row: c.row, col: c.col, runs };
+    return { row: c.row, col: c.col, runs, ...(c.waiting.length ? { look: c.waiting } : {}) };
   };
   const send = (op: TableOp, pending: PendingCell | undefined, to: Target | null): boolean => {
     const where = at();
@@ -409,7 +458,7 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
   };
   /** The cell being left is written as one intent, one undo step. */
   const focus = new CellFocus<Cell, Target>(read, (p, to) =>
-    "runs" in p ? send({ op: "setCell", row: p.row, col: p.col, runs: p.runs }, undefined, to) : send({ op: "setCellSource", row: p.row, col: p.col, markdown: p.markdown }, undefined, to),
+    "runs" in p ? send({ op: "setCell", row: p.row, col: p.col, runs: p.runs, ...(p.look ? { look: p.look } : {}) }, undefined, to) : send({ op: "setCellSource", row: p.row, col: p.col, markdown: p.markdown }, undefined, to),
   );
   /** The focused cell's content, for an operation that carries it. */
   const pendingOf = (c: Cell): PendingCell | undefined | null => (c === focus.editing ? read(c) : undefined);
@@ -459,6 +508,19 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       const trimmed = shown.slice(lead);
       return (kept = [toCodePoints(trimmed, a), toCodePoints(trimmed, b)]);
     };
+    // An empty cell has no text to style: a look chosen there waits for it (SPEC-CELLS 2.7), as
+    // a look chosen on an empty line of the note does. It is shown on the cell while the person
+    // types, and written with the text when the cell is (so typing and undo in the cell are
+    // what they are in any cell). Until then every pick joins what waits.
+    const empty = () => (el.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+    const setWaiting = (changes: Change[]): void => {
+      c.waiting = changes;
+      for (const p of LOOK_CSS) el.style.removeProperty(p);
+      for (const [p, v] of lookCss(changes)) el.style.setProperty(p, v);
+      // The toolbar shows what waits, however it was chosen (a key in the cell, too).
+      for (const f of listeners) f();
+    };
+    const waits = () => !gone && focus.editing === c && c.rich && (empty() || c.waiting.length > 0);
     /** A style operation on the selection in the cell, or on the whole cell with only the caret
      *  there. The selection is put back afterwards, a caret as a caret (so that what is typed next
      *  is added to the cell's text, not put in its place). */
@@ -490,10 +552,29 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       },
       selection,
       style(change: Change) {
-        styled((from, to) => ({ op: "styleCell", row: c.row, col: c.col, from, to, change }));
+        if (waits()) {
+          // One point up or down from the size that waits (the size cells have, if none does).
+          const size = c.waiting.reduce((pt, m) => (m.kind === "size" ? m.pt : pt), cellBaseSize());
+          setWaiting(addMark(c.waiting, change.kind === "size-step" ? { kind: "size", pt: stepSize(size, change.dir) } : change));
+        } else styled((from, to) => ({ op: "styleCell", row: c.row, col: c.col, from, to, change }));
       },
       applyStyle(style: SavedStyle | "reset") {
-        styled((from, to) => ({ op: "applyStyleCell", row: c.row, col: c.col, from, to, style }));
+        if (waits()) setWaiting(style === "reset" ? [] : changesOf(style, cellBaseSize()));
+        else styled((from, to) => ({ op: "applyStyleCell", row: c.row, col: c.col, from, to, style }));
+      },
+      waiting: () => (focus.editing === c ? c.waiting : []),
+      refocus() {
+        if (gone || focus.editing !== c) return;
+        // The caret goes back where it was, not to the start, where the browser puts it on focus.
+        const [from, to] = kept;
+        const back = (): void => {
+          if (gone || focus.editing !== c || document.activeElement !== el) return;
+          const shown = (el.textContent ?? "").replace(/\u00a0/g, " ");
+          const lead = shown.length - shown.trimStart().length;
+          selectIn(el, lead + toUtf16(shown.slice(lead), from), lead + toUtf16(shown.slice(lead), to));
+        };
+        el.focus();
+        back();
       },
       leave: () => leave(),
       flush: () => {
@@ -509,6 +590,8 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
     };
     /** Leaves the cell (blur, another cell, Save): what was typed is written. */
     function leave(): void {
+      // (Left by way of the toolbar, the size box say, with nothing typed: the look goes too.)
+      if (empty() && c.waiting.length) setWaiting([]);
       if (gone || focus.editing !== c) return;
       const r = focus.leave(c, clicked);
       // Written, but the table was not drawn again and the cell still has the focus.
@@ -518,8 +601,18 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       if (r === "refused" || (r === "unchanged" && !c.rich)) restore(c);
     }
     el.addEventListener("focus", () => {
+      // Another cell is still being edited: it was left by way of the toolbar (the size box, the
+      // style's name), which does not write it. It is written now, before this cell is entered,
+      // or what was typed in it would be lost.
+      const prev = focus.editing;
+      if (prev && prev !== c) {
+        prev.el.classList.remove("is-editing");
+        if (focus.leave(prev, { row: c.row, col: c.col }) === "written") return;
+      }
       setActive(handle);
       if (!focus.enter(c)) return;
+      // Entered anew: nothing waits from an earlier visit.
+      setWaiting([]);
       last = { row: c.row, col: c.col };
       el.classList.add("is-editing");
       if (c.rich) c.initial = JSON.stringify(domRuns(el, true));
@@ -535,6 +628,8 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       if (c.rich) c.initial = JSON.stringify(domRuns(el, true));
     };
     el.addEventListener("blur", (e) => {
+      // Left with nothing typed (a click away, Tab, Enter): the look that waited is dropped.
+      if (!(e.relatedTarget as Element | null)?.closest?.("[data-toolbar]") && empty()) setWaiting([]);
       if (gone || focus.editing !== c) return;
       selection();
       // To the toolbar: the cell stays as it is until a style is chosen there or the focus goes
@@ -588,6 +683,11 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
       } else if (mod && !e.shiftKey && !e.altKey && (key === "b" || key === "i" || key === "u")) {
         e.preventDefault();
         const kind = key === "b" ? "bold" : key === "i" ? "italic" : "underline";
+        if (waits()) {
+          // With a look waiting, the key turns its own setting on or off in it.
+          handle.style({ kind, on: !c.waiting.some((m) => m.kind === kind && m.on) } as Change);
+          return;
+        }
         const chars = cellChars(handle.source()) ?? [];
         const [a, b] = selection();
         const part = a === b ? chars : chars.slice(a, b);
@@ -602,7 +702,8 @@ export function mountTable(view: EditorView, wrap: HTMLElement, src: string): bo
         return;
       } else if (e.key === "Escape") {
         e.preventDefault();
-        // Escape leaves the cell and discards what was typed in it.
+        // Escape leaves the cell and discards what was typed in it, and a look waiting there.
+        setWaiting([]);
         focus.discard(c);
         if (active === handle) setActive(null);
         c.el.classList.remove("is-editing");

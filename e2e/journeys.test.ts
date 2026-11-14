@@ -316,6 +316,77 @@ test("a saved style in a table cell: two styles in two cells, one undo, the size
   await pick("Loud");
   await pick("Quiet");
   await has("| [*pears*]{color=blue} |");
+  // A blank cell: pick a style, then type. The look waits, the toolbar shows it, the text takes it.
+  await p.getByTestId("table-add-row").click();
+  await cell(2, 0).click();
+  await pick("Loud");
+  assert.equal(await p.getByText("Type something in the cell first").count(), 0, "a style picked in a blank cell is not refused");
+  assert.equal(await p.getByTestId("cmd-bold").getAttribute("aria-pressed"), "true", "the toolbar shows the waiting look");
+  await p.keyboard.type("grapes are good");
+  await cell(2, 1).click();
+  await has("| [**grapes are good**]{");
+  assert.match(await notesText(p), /\| \[\*\*grapes are good\*\*\]\{(color=red size=18pt|size=18pt color=red)\} \|/, "all of the text typed in the blank cell has the style");
+  // Single controls wait the same way, and a pick left without typing does not follow to another cell.
+  await p.getByTestId("cmd-italic").click();
+  await p.keyboard.type("figs");
+  await p.getByTestId("table-add-row").click();
+  await has("| *figs* |");
+  await cell(3, 0).click();
+  await pick("Quiet");
+  await cell(3, 1).click();
+  await p.keyboard.type("plain");
+  await cell(3, 0).click();
+  await p.keyboard.type("also plain");
+  await cell(2, 0).click();
+  await has("| also plain | plain |");
+  await cell(1, 1).click();
+  // A look left behind by Tab is not there on coming back; Ctrl+B twice in a blank cell is plain;
+  // Escape drops a waiting look.
+  await p.getByTestId("table-add-row").click();
+  await cell(2, 1).waitFor();
+  await cell(2, 1).click();
+  await pick("Loud");
+  await p.keyboard.press("Shift+Tab");
+  await p.keyboard.press("Tab");
+  await p.keyboard.type("tabbed");
+  await p.keyboard.press("Shift+Tab");
+  await p.keyboard.press("Control+b");
+  await p.keyboard.press("Control+b");
+  await p.keyboard.type("twice");
+  await cell(1, 1).click();
+  await has("| twice | tabbed |");
+  await p.getByTestId("table-add-row").click();
+  await cell(2, 0).click();
+  await pick("Quiet");
+  await p.keyboard.press("Escape");
+  await cell(2, 0).click();
+  await p.keyboard.type("escaped");
+  await cell(1, 1).click();
+  await has("| escaped | |");
+  // Larger steps from the size that waits (Loud is 18), the toolbar shows it, and after the size
+  // box the caret is back where it was: what is typed next is added at the end.
+  await p.getByTestId("table-add-row").click();
+  await cell(2, 0).click();
+  await pick("Loud");
+  await p.getByTestId("cmd-size-up").click();
+  assert.equal(await p.getByTestId("cmd-size").inputValue(), "19", "the size box shows the waiting size, one step up");
+  await p.keyboard.type("alpha");
+  await p.getByTestId("cmd-size").fill("21");
+  await p.getByTestId("cmd-size").press("Enter");
+  await p.keyboard.type("XYZ");
+  await cell(1, 1).click();
+  await has("[**alphaXYZ**]{");
+  assert.match(await notesText(p), /\[\*\*alphaXYZ\*\*\]\{(color=red size=21pt|size=21pt color=red)\}/);
+  // Text typed in a cell is not lost when the cell is left by way of the size box and another
+  // cell is clicked.
+  await p.getByTestId("table-add-row").click();
+  await cell(2, 0).click();
+  await p.keyboard.type("kept");
+  await p.getByTestId("cmd-size").click();
+  await cell(2, 1).click();
+  await p.keyboard.type("next");
+  await cell(1, 1).click();
+  await has("| kept | next |");
   // Default (reset) clears the cell.
   await pick("reset");
   await p.waitForFunction(() => /\| pears \|/.test((window as unknown as { __notes: { text(): string } }).__notes.text()));

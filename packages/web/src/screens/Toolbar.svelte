@@ -4,6 +4,7 @@
   import type { Style } from "../../../contract/src/index.ts";
   import type { Change, Intent, ToolbarState } from "../../../core/src/index.ts";
   import { command, INSERTS, LISTS } from "../lib/commands.ts";
+  import { refocusActiveCell } from "../editor/table.ts";
   import { HIGHLIGHTS, noteColour, PALETTE } from "../palette.ts";
   import { previewCss } from "../lib/styletext.ts";
   import { familyStyle } from "../lib/fontcss.ts";
@@ -105,7 +106,7 @@
     if (inCell) {
       // (A size the cell refused draws nothing again: the cell is given the focus back here.)
       queueMicrotask(() => {
-        if (document.activeElement?.closest("[data-toolbar]")) (document.querySelector('[data-testid="table-cell"].is-editing') as HTMLElement | null)?.focus();
+        if (document.activeElement?.closest("[data-toolbar]")) refocusActiveCell();
       });
       return;
     }

@@ -58,7 +58,7 @@
     inCell = cell !== null;
     if (cell) {
       const [a, b] = cell.selection();
-      st = describeCell(cell.source(), a, b);
+      st = describeCell(cell.source(), a, b, cell.waiting());
     } else {
       const f = v.state.field(editorField);
       noteSize = noteSizeOf(f.model);

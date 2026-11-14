@@ -165,3 +165,9 @@ export function cellChars(source: string): Ch[] | null {
 export function shownLength(source: string): number {
   return inner(PRE + source + POST)?.length ?? 0;
 }
+
+/** The size a cell's text has with no size of its own (the frame `cellChars` reads it in). A
+ *  style that names no size is given it, so that no size is written into the cell. */
+export function cellBaseSize(): number {
+  return (cellChars("x") ?? [])[0]?.style.size ?? 12;
+}
